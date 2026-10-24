@@ -108,7 +108,7 @@ const iso=d=>d.toISOString().slice(0,10);
 const today=()=>iso(new Date());
 const days=d=>d?Math.round((new Date(d)-new Date(today()))/864e5):Infinity;
 const addDays=n=>{const d=new Date();d.setDate(d.getDate()+n);return iso(d)};
-const save=()=>{if(S.hist.length>60)S.hist.length=60;W("items",S.items);W("lib",S.lib);W("hist",S.hist);W("mine",S.mine);W("shop",S.shop);push()};
+const save=()=>{if(S.hist.length>60)S.hist.length=60;W("items",S.items);W("lib",S.lib);W("hist",S.hist);W("mine",S.mine);W("shop",S.shop);if(!ghMute){try{localStorage.setItem("lm",Date.now())}catch(e){}if(ghOn())ghSched()}push()};
 const fmt=(q,u)=>u==="pz"?q+" pz":q>=1000?(q/1000).toFixed(q%1000?2:0).replace(/\.?0+$/,"")+(u==="g"?" kg":" l"):Math.round(q)+" "+u;
 const guess=n=>{n=n.toLowerCase();for(const c in KW)if(KW[c].split(" ").some(k=>n.includes(k)))return c;return "Altro"};
 const soon=()=>S.items.filter(i=>days(i.exp)<=3);
@@ -116,7 +116,7 @@ function toast(m){$("t").innerHTML=`<div class="toast">${m}</div>`;setTimeout(()
 function render(){if(S.tab!=="nuova")S.edId=null;
  const tabs=[["oggi","🏠 Oggi"],["dispensa","Dispensa"],["add","Aggiungi spesa"],["ricette","Ricette AI"],["cerca","Cerca online"],["nuova","Nuova ricetta"],["ricettario","Ricettario"],["lista","Lista spesa"+(S.shop.filter(x=>!x.done).length?" ("+S.shop.filter(x=>!x.done).length+")":"")],["pref","Preferiti"],["cron","Cronologia"]];
  $("nav").innerHTML=tabs.map(([k,n])=>`<button class="${S.tab===k?"on":""}" onclick="S.tab='${k}';render()">${n}</button>`).join("");
- $("v").innerHTML=({oggi:vOggi,dispensa:vDisp,add:vAdd,ricette:vRic,cerca:vSearch,nuova:vNew,ricettario:vBook,lista:vShop,pref:vPref,cron:vHist})[S.tab]()+(S.tab==="dispensa"?vBackup():"");
+ $("v").innerHTML=({oggi:vOggi,dispensa:vDisp,add:vAdd,ricette:vRic,cerca:vSearch,nuova:vNew,ricettario:vBook,lista:vShop,pref:vPref,cron:vHist})[S.tab]()+(S.tab==="dispensa"?vBackup()+(window.setKey?ghCard():""):"");
 }
 const EM=[["uov","🥚"],["pasta","🍝"],["spaghet","🍝"],["riso","🍚"],["farina","🌾"],["pane","🍞"],["latte","🥛"],["yogurt","🥛"],["panna","🥛"],["formagg","🧀"],["parmigiano","🧀"],["mozzarella","🧀"],["ricotta","🧀"],["burro","🧈"],["pollo","🍗"],["manzo","🥩"],["maiale","🥩"],["carne","🥩"],["prosciutto","🥓"],["salame","🥓"],["tonno","🐟"],["salmone","🐟"],["pesce","🐟"],["pomodor","🍅"],["passata","🍅"],["insalata","🥬"],["spinaci","🥬"],["zucchin","🥒"],["carot","🥕"],["patat","🥔"],["cipolla","🧅"],["aglio","🧄"],["limon","🍋"],["melanzan","🍆"],["mela","🍎"],["banana","🍌"],["arancia","🍊"],["fragol","🍓"],["uva","🍇"],["peperon","🫑"],["funghi","🍄"],["fagioli","🫘"],["ceci","🫘"],["lenticch","🫘"],["piselli","🌱"],["olio","🫒"],["sale","🧂"],["zucchero","🍬"],["miele","🍯"],["cioccolat","🍫"],["biscott","🍪"],["acqua","💧"],["succo","🧃"],["vino","🍷"],["birra","🍺"],["caffè","☕"]];
 const CE={"Cereali e derivati":"🌾","Latticini e uova":"🥛","Carne e pesce":"🥩","Frutta e verdura":"🥦","Legumi":"🫘","Condimenti e oli":"🫒","Dolci e snack":"🍪","Bevande":"🥤","Altro":"🛒"};
@@ -229,6 +229,50 @@ function vOggi(){
  if(almost.length)h+=`<h2>🛒 Quasi pronte</h2>`+almost.map(tile).join("");
  return h+`<div class="row" style="gap:8px;flex-wrap:wrap;margin-top:14px"><button class="btn" onclick="S.tab='ricette';render()">✨ Nuove ricette dall’AI</button><button class="btn g" onclick="S.tab='add';render()">➕ Aggiungi spesa</button><button class="btn g" onclick="S.tab='lista';render()">🛒 Lista spesa</button></div>`}
 function syncSite(){if(!S.cf){S.cf=1;setTimeout(()=>S.cf=0,6000);return toast("Questo sostituisce i dati di questo dispositivo con quelli del sito. Premi di nuovo “Aggiorna dal sito” entro 6 secondi per confermare.")}S.cf=0;autoLoad(true)}
+const GHP="dispensa-smart-dati.json";let ghMute=false,ghT,ghBusy=false,ghAgain=false,ghSha=null;
+const ghCfg=()=>{try{return JSON.parse(localStorage.getItem("gh"))}catch(e){return null}};
+const ghOn=()=>{const c=ghCfg();return !!(c&&c.owner&&c.repo&&c.token)};
+const ghTxt=()=>{const s=S.ghst;if(!ghOn())return "Non collegato.";if(!s)return "Collegato. In attesa della prima sincronizzazione…";return s.s==="ok"?"☁️ Sincronizzato alle "+new Date(s.t).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}):"⚠️ "+s.m};
+function ghSt(s,m){S.ghst={s,m,t:Date.now()};const e=$("ghs");if(e)e.textContent=ghTxt();const y=$("sy");if(y&&ghOn())y.textContent=s==="ok"?"☁️ GitHub sincronizzato":"⚠️ GitHub: errore"}
+const ghApi=(method,url,body)=>{const c=ghCfg();return fetch("https://api.github.com/repos/"+c.owner+"/"+c.repo+url,{method,headers:{authorization:"Bearer "+c.token,accept:"application/vnd.github+json","content-type":"application/json"},body:body?JSON.stringify(body):undefined,cache:"no-store"})};
+const b64e=s=>{const b=new TextEncoder().encode(s);let o="";for(let i=0;i<b.length;i+=8192)o+=String.fromCharCode.apply(null,b.subarray(i,i+8192));return btoa(o)};
+const b64d=s=>{const o=atob(s.replace(/\s/g,"")),u=new Uint8Array(o.length);for(let i=0;i<o.length;i++)u[i]=o.charCodeAt(i);return new TextDecoder().decode(u)};
+async function ghGet(){const r=await ghApi("GET","/contents/"+GHP);
+ if(r.status===404){const rr=await ghApi("GET","");if(!rr.ok)throw new Error("Repository non trovato: controlla utente, nome del repository e permessi del token.");return null}
+ if(r.status===401||r.status===403)throw new Error("Token non valido o senza permessi (serve Contents: Read and write su questo repository).");
+ if(!r.ok)throw new Error("GitHub ha risposto "+r.status+".");
+ const m=await r.json();let txt;
+ if(m.content&&m.encoding==="base64")txt=b64d(m.content);
+ else{const br=await ghApi("GET","/git/blobs/"+m.sha);if(!br.ok)throw new Error("Lettura del file non riuscita ("+br.status+").");txt=b64d((await br.json()).content)}
+ return{d:JSON.parse(txt),sha:m.sha}}
+function ghSched(){clearTimeout(ghT);ghT=setTimeout(()=>ghPush(),3000)}
+async function ghPush(retry){if(!ghOn())return;if(ghBusy){ghAgain=true;return}ghBusy=true;
+ try{const lm=+localStorage.getItem("lm")||Date.now();
+  const body={message:"Dispensa Smart: aggiornamento dati",content:b64e(JSON.stringify({...bkData(),saved:new Date(lm).toISOString()}))};
+  if(ghSha)body.sha=ghSha;
+  const r=await ghApi("PUT","/contents/"+GHP,body);
+  if(r.ok){ghSha=(await r.json()).content.sha;ghSt("ok")}
+  else if((r.status===409||r.status===422)&&!retry){const g=await ghGet();ghSha=g?g.sha:null;if(g){ghMute=true;try{bkApply(g.d,false)}finally{ghMute=false}}ghBusy=false;return ghPush(1)}
+  else if(r.status===401||r.status===403)throw new Error("Il token non ha il permesso di scrittura (Contents: Read and write).");
+  else throw new Error("Salvataggio su GitHub non riuscito ("+r.status+").");
+ }catch(e){ghSt("err",e.message)}
+ ghBusy=false;if(ghAgain){ghAgain=false;ghSched()}}
+async function ghPull(manual){if(!ghOn()||ghBusy)return;
+ try{const g=await ghGet(),has=S.items.length||S.mine.length;
+  if(!g){if(has)await ghPush();else if(manual)toast("Sul repository non c’è ancora nessun file dati.");ghSt("ok");return}
+  ghSha=g.sha;const rs=Date.parse(g.d.saved)||0,lm=+localStorage.getItem("lm")||0,synced=localStorage.getItem("ghsynced");
+  if(!has||(synced&&rs>lm)){ghMute=true;try{bkApply(g.d,true)}finally{ghMute=false}localStorage.setItem("lm",rs);localStorage.setItem("ghsynced","1");ghSt("ok")}
+  else if(!synced){ghMute=true;try{bkApply(g.d,false)}finally{ghMute=false}localStorage.setItem("ghsynced","1");localStorage.setItem("lm",Date.now());await ghPush()}
+  else if(lm>rs)await ghPush();
+  else ghSt("ok");
+ }catch(e){ghSt("err",e.message)}}
+function ghInit(){if(document.addEventListener&&!window.__ghv){window.__ghv=1;document.addEventListener("visibilitychange",()=>{if(!document.hidden)ghPull()})}return ghPull()}
+function ghSave(){const c=x=>($(x).value||"").trim().replace(/[\s\/]/g,"");
+ const cfg={owner:c("gho"),repo:c("ghr"),token:($("ght").value||"").trim()};
+ if(!cfg.owner||!cfg.repo||!cfg.token)return toast("Compila utente, repository e token.");
+ localStorage.setItem("gh",JSON.stringify(cfg));localStorage.removeItem("ghsynced");ghSha=null;S.ghst=null;toast("Collegamento in corso…");ghInit()}
+function ghOff(){localStorage.removeItem("gh");localStorage.removeItem("ghsynced");ghSha=null;S.ghst=null;render();toast("Sincronizzazione GitHub disattivata. I dati restano su questo dispositivo.")}
+function ghCard(){const c=ghCfg()||{};return `<div class="card"><b>☁️ Sincronizzazione automatica con GitHub</b><div class="mu">Dati, ricette e foto vengono salvati da soli nel file dispensa-smart-dati.json del tuo repository e riletti quando apri l’app, su telefono e computer. Il token resta solo in questo browser.</div><input id="gho" placeholder="Utente GitHub (es. mario-rossi)" value="${esc(c.owner||"")}" style="margin-top:8px"><input id="ghr" placeholder="Nome del repository (es. dispensa-dati)" value="${esc(c.repo||"")}" style="margin-top:6px"><input id="ght" type="password" placeholder="Token personale (github_pat_…)" value="${esc(c.token||"")}" style="margin-top:6px"><div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap"><button class="btn" onclick="ghSave()">Collega</button><button class="btn g" onclick="ghPull(true)">Sincronizza ora</button><button class="btn g" onclick="ghOff()">Scollega</button></div><div class="mu" id="ghs" style="margin-top:8px">${esc(ghTxt())}</div><details style="margin-top:8px"><summary class="mu" style="cursor:pointer">Come creare il token</summary><div class="mu">1. Su github.com: foto profilo → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.<br>2. Repository access: “Only select repositories” e scegli il repository dei dati.<br>3. Repository permissions → Contents: Read and write.<br>4. Genera il token, copialo e incollalo qui sopra.</div></details></div>`}
 function vBackup(){return `<div class="card"><b>💾 Backup e importazione dati</b><div class="mu">“Copia i miei dati” mette tutto in questo riquadro. Per importare, incolla qui un backup e premi Importa: i dati già presenti non vengono cancellati.</div><textarea id="bk" rows="4" placeholder="Incolla qui il backup…" style="width:100%;margin-top:8px;padding:10px;border:1px solid var(--bd);border-radius:22px;background:var(--card);color:var(--tx);font:inherit"></textarea><div class="row" style="margin-top:8px"><button class="btn g" onclick="bkCopy()">Copia i miei dati</button><button class="btn" onclick="bkImp()">Importa</button></div><div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap"><button class="btn g" onclick="bkFile()">⬇️ Salva file JSON</button><label class="btn g" style="cursor:pointer">📂 Carica file JSON<input type="file" accept=".json,application/json" hidden onchange="bkLoad(this)"></label><button class="btn g" onclick="syncSite()">🔄 Aggiorna dal sito</button></div><div class="mu" style="margin-top:8px">Il file <b>dispensa-smart-dati.json</b> contiene prodotti, ricette, lista, cronologia e foto. Se lo metti accanto all’HTML su un sito, viene caricato da solo su un dispositivo ancora vuoto.</div></div>`}
 const bkData=()=>({app:"dispensa-smart",saved:new Date().toISOString(),items:S.items,mine:S.mine,shop:S.shop,hist:S.hist,lib:S.lib,ph:S.ph});
 function bkFile(){const t=JSON.stringify(bkData());const ta=$("bk");if(ta)ta.value=t.length<150000?t:"";
@@ -374,6 +418,6 @@ async function sync(){
    if(c){cache();if(S.tab!=="add"&&S.tab!=="nuova")render()}},()=>setSy("local"));
  }catch(e){setSy("local")}
 }
-render();sync();autoLoad();
+render();sync();(ghOn()?ghInit():autoLoad());
 </script><script>if("serviceWorker" in navigator&&location.protocol.indexOf("http")===0)navigator.serviceWorker.register("sw.js").catch(function(){});</script>
 </body></html>
