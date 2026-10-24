@@ -158,8 +158,8 @@ function tick(id){const x=S.shop.find(s=>s.id===id);if(!x)return;
  const ex=S.items.find(i=>i.u===u&&nm(i.name)===nm(x.name));let pid,merged=null;
  if(ex){merged={q:ex.q,exp:ex.exp};ex.q+=q;ex.exp=!ex.exp||!exp?"":(ex.exp>=today()&&ex.exp<exp?ex.exp:exp);pid=ex.id}
  else{pid="p"+Date.now()+Math.random().toString(36).slice(2,5);S.items.push({id:pid,name:x.name,cat,q,u,exp})}
- S.shop=S.shop.filter(s=>s.id!==id);S.undo={x:{...x},pid,merged};save();render();
- toast(`✅ ${esc(x.name)} è in dispensa (${fmt(q,u)}, ${exp?"scade "+exp.split("-").reverse().join("/"):"senza scadenza"})${est?"<br>Quantità stimata":""}<br><a href="#" onclick="undoTick();return false" style="color:inherit;font-weight:700">Annulla</a> · <a href="#" onclick="S.tab='dispensa';S.ed='${pid}';render();return false" style="color:inherit;font-weight:700">Modifica</a>`)}
+ S.shop=S.shop.filter(s=>s.id!==id);S.undo={x:{...x},pid,merged};const L0=(LOCS.find(l=>l[0]===locOf(S.items.find(i=>i.id===pid)))||LOCS[0])[1];save();render();
+ toast(`✅ ${esc(x.name)} → ${L0} (${fmt(q,u)}, ${exp?"scade "+exp.split("-").reverse().join("/"):"senza scadenza"})${est?"<br>Quantità stimata":""}<br><a href="#" onclick="undoTick();return false" style="color:inherit;font-weight:700">Annulla</a> · <a href="#" onclick="S.tab='dispensa';S.ed='${pid}';render();return false" style="color:inherit;font-weight:700">Modifica</a>`)}
 function undoTick(){const u=S.undo;if(!u)return;if(u.merged){const it=S.items.find(i=>i.id===u.pid);if(it){it.q=u.merged.q;it.exp=u.merged.exp}}else S.items=S.items.filter(i=>i.id!==u.pid);S.shop.push(u.x);S.undo=null;save();render();toast("Acquisto annullato.")}
 function saveEd(id){const it=S.items.find(i=>i.id===id);if(it){const e=$("ed").value,q=parseFloat($("eq").value);if($("en").checked)it.exp="";else if(e)it.exp=e;if(q>0)it.q=q}S.ed=null;save();render()}
 function rmShop(id){S.shop=S.shop.filter(s=>s.id!==id);save();render()}
@@ -243,7 +243,7 @@ function bkApply(d,rep){if(rep&&(d.items||d.mine)){S.items=[];S.mine=[];S.shop=[
  if(Array.isArray(d))d={items:d};
  const g=k=>{let v=d&&d[k];if(typeof v==="string"){try{v=JSON.parse(v)}catch(e){v=null}}return v};
  let ni=0,nm2=0,ns=0;
- const it=g("items");if(Array.isArray(it)){const ids=new Set(S.items.map(i=>i.id));it.forEach(i=>{if(i&&i.id&&i.name&&!ids.has(i.id)){S.items.push({id:String(i.id),name:String(i.name),cat:CATS.includes(i.cat)?i.cat:guess(String(i.name)),q:+i.q>0?+i.q:1,u:["g","ml","pz"].includes(i.u)?i.u:"pz",exp:i.exp||""});ni++}})}
+ const it=g("items");if(Array.isArray(it)){const ids=new Set(S.items.map(i=>i.id));it.forEach(i=>{if(i&&i.id&&i.name&&!ids.has(i.id)){S.items.push({id:String(i.id),name:String(i.name),cat:CATS.includes(i.cat)?i.cat:guess(String(i.name)),q:+i.q>0?+i.q:1,u:["g","ml","pz"].includes(i.u)?i.u:"pz",exp:i.exp||"",loc:["dispensa","frigo","congelatore"].includes(i.loc)?i.loc:""});ni++}})}
  const mi=g("mine");if(Array.isArray(mi)){const ts=new Set(S.mine.map(m=>nm(m.title)));mi.forEach(r=>{if(r&&r.title&&Array.isArray(r.steps)&&Array.isArray(r.ingredients)&&!ts.has(nm(r.title))){S.mine.push({...r,id:r.id||"m"+Date.now()+nm2,src:r.src||"manual"});nm2++}})}
  const sh=g("shop");if(Array.isArray(sh)){const ids=new Set(S.shop.map(i=>i.id));sh.forEach(x=>{if(x&&x.id&&x.name&&!ids.has(x.id)){S.shop.push({id:String(x.id),name:String(x.name),amount:+x.amount||0,unit:x.unit||"",done:!!x.done,from:x.from||""});ns++}})}
  const hi=g("hist");if(Array.isArray(hi)){const ats=new Set(S.hist.map(h=>h.at));hi.forEach(h=>{if(h&&h.at&&h.r&&!ats.has(h.at))S.hist.push(h)});S.hist.sort((a,b)=>b.at-a.at)}
@@ -251,23 +251,39 @@ function bkApply(d,rep){if(rep&&(d.items||d.mine)){S.items=[];S.mine=[];S.shop=[
  const ph=g("ph");let np=0;if(ph&&typeof ph==="object"&&!Array.isArray(ph)){Object.keys(ph).forEach(t=>{if(!S.ph[t]){S.ph[t]=ph[t];np++;phPush(t)}});W("ph",S.ph)}
  if(!(ni||nm2||ns||np)&&!hi&&!lb)return toast("Non ho trovato dati nuovi da importare.");
  save();render();toast(`✅ Importati: ${ni} prodotti, ${nm2} ricette, ${ns} voci della lista`)}
+const LOCS=[["dispensa","🥫 Dispensa"],["frigo","🧊 Frigo"],["congelatore","❄️ Congelatore"]];
+function guessLoc(i){const n=nm(i.name),c=i.cat;
+ if(/congelator|freezer/.test(n))return"congelatore";
+ if(/frigo/.test(n))return"frigo";
+ if(/surgelat|congelat|gelato|sorbett|ghiacciol|bastoncini|findus|4 salti/.test(n))return"congelatore";
+ if(/uht|scatol|lattin|conserv|sott'olio|sottolio|pelati|passata|polvere|secc[oa]|barattol|biscott|cioccolat|zucchero|farina|pasta|riso|\bolio|aceto|\bsale\b|miele|cacao|lievito|vanil|amido|gelatina|marmellat|nocciole|patat|cipoll|aglio|banan/.test(n))return"dispensa";
+ if(/latte|yogurt|burro|panna|formagg|mozzarella|ricotta|mascarpone|uova|uovo|prosciutto|salame|affettat|besciamella|pollo|manzo|maiale|carne|pesce|salmone|wurstel|speck|pancetta|guanciale/.test(n))return"frigo";
+ return ["Latticini e uova","Carne e pesce","Frutta e verdura"].includes(c)?"frigo":"dispensa"}
+const locOf=i=>i.loc||guessLoc(i);
+function mv(id,k){const it=S.items.find(i=>i.id===id);if(!it)return;it.loc=k;save();render();toast(`${emo(it.name,it.cat)} ${esc(it.name)} → ${(LOCS.find(l=>l[0]===k)||LOCS[0])[1]}`)}
+function autoSort(){const n=S.items.filter(i=>i.loc&&i.loc!==guessLoc(i)).length;
+ if(!n)return toast("Tutti i prodotti sono già nella sezione consigliata.");
+ if(!S.cf2){S.cf2=1;setTimeout(()=>S.cf2=0,6000);return toast(`${n} prodott${n===1?"o":"i"} che hai spostato a mano torner${n===1?"à":"anno"} nella sezione consigliata. Premi di nuovo “Smista in automatico” entro 6 secondi per confermare.`)}
+ S.cf2=0;S.items.forEach(i=>{i.loc=""});save();render();toast(`🔄 ${n} prodott${n===1?"o rimesso":"i rimessi"} nella sezione automatica`)}
 function vDisp(){
  const s=soon();let h=s.length?`<div class="al">⚠️ In scadenza: <b>${s.map(i=>esc(i.name)).join(", ")}</b>. <a href="#" onclick="S.tab='ricette';render();return false">Trova ricette per evitare sprechi →</a></div>`:"";
+ const lf=S.lf||"all",cnt=k=>S.items.filter(i=>locOf(i)===k).length;
+ h+=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">${[["all","Tutto ("+S.items.length+")"],...LOCS.map(([k,n])=>[k,n+" ("+cnt(k)+")"])].map(([k,n])=>`<button class="btn ${lf===k?"":"g"}" style="padding:6px 12px;font-size:14px" onclick="S.lf='${k}';render()">${n}</button>`).join("")}<button class="btn g" style="padding:6px 12px;font-size:14px" onclick="autoSort()">🔄 Smista in automatico</button></div>`;
  if(!S.items.length)return h+`<p class="mu">La dispensa è vuota. Aggiungi la spesa dalla scheda “Aggiungi spesa”.</p>`;
- CATS.forEach(c=>{const l=S.items.filter(i=>i.cat===c).sort((a,b)=>(a.exp||"9")<(b.exp||"9")?-1:1);if(!l.length)return;
-  h+=`<h2>${CE[c]} ${c}</h2>`+l.map(i=>{const d=days(i.exp);return `<div class="card row"><div><b>${emo(i.name,i.cat)} ${esc(i.name)}</b><div class="mu">${fmt(i.q,i.u)} · ${i.exp?"scade "+i.exp.split("-").reverse().join("/"):"senza scadenza"}</div>${S.ed===i.id?`<div class="row" style="margin-top:6px;gap:6px;flex-wrap:wrap"><input id="ed" type="date" value="${i.exp}"><label class="mu" style="white-space:nowrap"><input id="en" type="checkbox" style="width:auto" ${i.exp?"":"checked"}> senza scad.</label><input id="eq" type="number" min="0" step="any" value="${Math.round(i.q)}"><span class="mu">${i.u}</span><button class="btn" style="padding:6px 14px" onclick="saveEd('${i.id}')">OK</button></div>`:""}</div><div>${i.exp?`<span class="bd ${d>3?"ok":""}">${d<0?"scaduto":d===0?"oggi":d+" gg"}</span>`:`<span class="bd ok">senza scad.</span>`} <button class="x" onclick="S.ed='${i.id}';render()" aria-label="Modifica">✏️</button><button class="x" onclick="del('${i.id}')" aria-label="Elimina">✕</button></div></div>`}).join("")});
- return h}
+ CATS.forEach(c=>{const l=S.items.filter(i=>i.cat===c&&(lf==="all"||locOf(i)===lf)).sort((a,b)=>(a.exp||"9")<(b.exp||"9")?-1:1);if(!l.length)return;
+  h+=`<h2>${CE[c]} ${c}</h2>`+l.map(i=>{const d=days(i.exp);return `<div class="card row"><div><b>${emo(i.name,i.cat)} ${esc(i.name)}</b><div class="mu">${fmt(i.q,i.u)} · ${i.exp?"scade "+i.exp.split("-").reverse().join("/"):"senza scadenza"}</div>${S.ed===i.id?`<div class="row" style="margin-top:6px;gap:6px;flex-wrap:wrap"><input id="ed" type="date" value="${i.exp}"><label class="mu" style="white-space:nowrap"><input id="en" type="checkbox" style="width:auto" ${i.exp?"":"checked"}> senza scad.</label><input id="eq" type="number" min="0" step="any" value="${Math.round(i.q)}"><span class="mu">${i.u}</span><button class="btn" style="padding:6px 14px" onclick="saveEd('${i.id}')">OK</button></div>`:""}</div><div>${i.exp?`<span class="bd ${d>3?"ok":""}">${d<0?"scaduto":d===0?"oggi":d+" gg"}</span>`:`<span class="bd ok">senza scad.</span>`} <select style="width:auto;padding:4px 6px;border-radius:99px" onchange="mv('${i.id}',this.value)" aria-label="Posizione" title="Sposta in…">${LOCS.map(([k,n])=>`<option value="${k}" ${locOf(i)===k?"selected":""}>${n}</option>`).join("")}</select><button class="x" onclick="S.ed='${i.id}';render()" aria-label="Modifica">✏️</button><button class="x" onclick="del('${i.id}')" aria-label="Elimina">✕</button></div></div>`}).join("")});
+ return h+(S.items.some(i=>lf==="all"||locOf(i)===lf)?"":`<p class="mu">Non c’è ancora niente in questa sezione.</p>`)}
 function del(id){S.items=S.items.filter(i=>i.id!==id);save();render()}
 function vAdd(){return `<div class="card"><div class="f">
 <div class="w"><input id="n" placeholder="Prodotto (es. Pasta penne)" oninput="$('c').value=guess(this.value)"></div>
-<div class="w"><select id="c">${CATS.map(c=>`<option>${c}</option>`).join("")}</select></div>
+<div class="w"><select id="c">${CATS.map(c=>`<option>${c}</option>`).join("")}</select></div><div class="w"><select id="loc"><option value="">Dove lo metti? Automatico</option>${LOCS.map(([k,n])=>`<option value="${k}">${n}</option>`).join("")}</select></div>
 <input id="q" type="number" min="0" step="any" placeholder="Quantità"><select id="u"><option>kg</option><option>g</option><option>l</option><option>ml</option><option>pz</option></select>
 <div class="w"><label class="mu">Data di scadenza</label><input id="e" type="date" value="${addDays(7)}"><label class="mu" style="display:flex;gap:8px;align-items:center;margin-top:6px"><input id="ne" type="checkbox" style="width:auto" onchange="$('e').disabled=this.checked"> Senza scadenza</label></div>
 <div class="w"><button class="btn" style="width:100%" onclick="add()">Aggiungi alla dispensa</button></div></div></div>`}
 function add(){const n=$("n").value.trim(),q=parseFloat($("q").value),u=$("u").value,e=$("e").value;
  if(!n||!(q>0)||(!e&&!$("ne").checked))return toast("Compila nome, quantità e scadenza.");
- S.items.push({id:"p"+Date.now(),name:n,cat:$("c").value,q:q*U[u][1],u:U[u][0],exp:$("ne").checked?"":e});save();toast("Aggiunto: "+esc(n));
- $("n").value="";$("q").value="";$("c").value="Altro";$("ne").checked=false;$("e").disabled=false}
+ S.items.push({id:"p"+Date.now(),name:n,cat:$("c").value,q:q*U[u][1],u:U[u][0],exp:$("ne").checked?"":e,loc:$("loc").value});save();toast("Aggiunto: "+esc(n)+" → "+(LOCS.find(l=>l[0]===locOf(S.items[S.items.length-1]))||LOCS[0])[1]);
+ $("n").value="";$("q").value="";$("c").value="Altro";$("loc").value="";$("ne").checked=false;$("e").disabled=false}
 function vRic(){
  if(S.cur)return vCur();
  const s=soon();
@@ -278,7 +294,7 @@ function card(r,i){return `<div class="card row" style="cursor:pointer" onclick=
 async function gen(more){
  S.busy=true;S.err="";render();
  try{const sm=await claude.use("sample");if(!sm)throw new Error("L’agente AI non è disponibile in questa vista.");
-  const pantry=S.items.map(i=>({id:i.id,nome:i.name,cat:i.cat,quantita:Math.round(i.q),unita:i.u,giorni_a_scadenza:i.exp?days(i.exp):null}));
+  const pantry=S.items.map(i=>({id:i.id,nome:i.name,cat:i.cat,quantita:Math.round(i.q),unita:i.u,giorni_a_scadenza:i.exp?days(i.exp):null,posizione:locOf(i)}));
   const r=await sm.json(`Sei uno chef italiano. Dispensa (JSON): ${JSON.stringify(pantry)}
 Proponi 8 ricette${S.gc?", tutte e solo della portata «"+S.gc+"» ("+CDEF[S.gc]+"); non proporre ricette di altre portate":""}${more&&S.recs.length?"; non riproporre queste già suggerite: "+S.recs.map(x=>x.title).join(", "):""}, realizzabili SOLO con questi prodotti (più basi non tracciate: acqua, sale, pepe). Dai priorità alle ricette che usano prodotti con giorni_a_scadenza <= 3. Per 1-2 persone. Per ogni ingrediente della dispensa indica l'id esatto e la quantità nella stessa unità (g, ml o pz) senza superare la quantità disponibile; per le basi usa id null.
 Rispondi SOLO con un array JSON: [{"title":"","emoji":"🍝","course":"Antipasto|Primo|Secondo|Contorno|Dolce","time":"25 min","ingredients":[{"id":"p123"|null,"name":"","amount":0,"unit":"g|ml|pz"}],"steps":["..."]}]. Da 4 a 7 step chiari, in italiano. Il campo course deve riportare la portata reale della ricetta.`,{modelTier:"default"});
