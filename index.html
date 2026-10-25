@@ -426,9 +426,22 @@ function loadPdf(){if(window.pdfjsLib)return Promise.resolve(window.pdfjsLib);if
  pdfP=new Promise((res,rej)=>{const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
   s.onload=()=>{try{window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";res(window.pdfjsLib)}catch(e){pdfP=null;rej(e)}};
   s.onerror=()=>{pdfP=null;rej(new Error("Impossibile caricare il lettore PDF: serve la connessione a internet."))};document.head.appendChild(s)});return pdfP}
-async function pdfText(file,lib){const buf=await file.arrayBuffer();const pdf=await lib.getDocument({data:buf}).promise;const out=[];
- for(let p=1;p<=Math.min(pdf.numPages,40);p++){const pg=await pdf.getPage(p),c=await pg.getTextContent();out.push(c.items.map(i=>i.str+(i.hasEOL?"\n":" ")).join(""))}return out.join("\n\n")}
-const flyPrompt=(chunk,store)=>`Oggi è ${today()}. Questo è il testo estratto da un volantino${store?" di "+store:""} (le colonne possono essere mescolate). Estrai le offerte di prodotti che compaiono (fino a 60), alimentari per prime. Usa SOLO ciò che è scritto: non inventare prodotti, prezzi o date. Per ogni offerta indica: item (prodotto, con marca e formato se presenti), offer (descrizione, per esempio 2x1, -30%, sottocosto), price (prezzo come scritto), from e to (validità di quella offerta). Le date vanno in formato AAAA-MM-GG solo se sono scritte nel testo (se manca l'anno usa l'anno di oggi), altrimenti null. In from e to di primo livello metti il periodo di validità generale del volantino, se scritto. Rispondi SOLO con JSON: {"from":null,"to":null,"offers":[{"item":"","offer":"","price":"","from":null,"to":null}]}.\nTESTO:\n"""${chunk}"""`;
+let ocrP=null,ocrW=null;
+function loadOcr(){if(window.Tesseract)return Promise.resolve(window.Tesseract);if(ocrP)return ocrP;ocrP=new Promise((res,rej)=>{const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.5/tesseract.min.js";s.onload=()=>res(window.Tesseract);s.onerror=()=>{ocrP=null;rej(new Error("impossibile caricare il lettore OCR"))};document.head.appendChild(s)});return ocrP}
+async function ocrWorker(){if(ocrW)return ocrW;const T=await loadOcr();ocrW=await T.createWorker("ita");return ocrW}
+async function pdfText(file,lib,prog){const buf=await file.arrayBuffer();const pdf=await lib.getDocument({data:buf}).promise;const N=Math.min(pdf.numPages,24),out=[],layer=[];let ocrN=0,w=null,fail=null;
+ for(let p=1;p<=N;p++){const pg=await pdf.getPage(p);
+  try{const c=await pg.getTextContent();layer.push(c.items.map(i=>i.str+(i.hasEOL?"\n":" ")).join(""))}catch(e){layer.push("")}
+  if(prog)prog(`Converto in immagine e leggo la pagina ${p} di ${N}…`);
+  try{w=w||await ocrWorker();const vp=pg.getViewport({scale:2.5}),cv=document.createElement("canvas");cv.width=Math.round(vp.width);cv.height=Math.round(vp.height);const g=cv.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,cv.width,cv.height);await pg.render({canvasContext:g,viewport:vp}).promise;
+   const im=g.getImageData(0,0,cv.width,cv.height),d=im.data;for(let i=0;i<d.length;i+=4){let y=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];y=Math.max(0,Math.min(255,(y-128)*1.25+128));d[i]=d[i+1]=d[i+2]=y}g.putImageData(im,0,0);
+   const r=await w.recognize(cv);out.push((r.data&&r.data.text)||"");ocrN++;cv.width=cv.height=1}
+  catch(e){ocrW=null;w=null;fail=e;out.push("")}}
+ const ocrTxt=out.join("\n\n"),layTxt=layer.join("\n\n"),nz=t=>t.replace(/\s/g,"").length;
+ if(nz(ocrTxt)>=nz(layTxt)*0.5&&nz(ocrTxt)>0)return{text:ocrTxt,ocr:ocrN};
+ if(nz(layTxt)>0)return{text:layTxt,ocr:0};
+ throw new Error("Il riconoscimento del testo dalle immagini non è riuscito"+(fail?" ("+(fail.message||"errore")+")":"")+". Serve internet per scaricare il lettore e la lingua italiana. Puoi incollare il testo del volantino.")}
+const flyPrompt=(chunk,store)=>`Oggi è ${today()}. Questo è il testo estratto da un volantino${store?" di "+store:""} (le colonne possono essere mescolate).${S.focr?" Il testo viene da un riconoscimento di immagini (OCR) e può contenere errori di lettura: se un prodotto o un prezzo non è chiaro, omettilo.":""} Estrai le offerte di prodotti che compaiono (fino a 60), alimentari per prime. Usa SOLO ciò che è scritto: non inventare prodotti, prezzi o date. Per ogni offerta indica: item (prodotto, con marca e formato se presenti), offer (descrizione, per esempio 2x1, -30%, sottocosto), price (prezzo come scritto), from e to (validità di quella offerta). Le date vanno in formato AAAA-MM-GG solo se sono scritte nel testo (se manca l'anno usa l'anno di oggi), altrimenti null. In from e to di primo livello metti il periodo di validità generale del volantino, se scritto. Rispondi SOLO con JSON: {"from":null,"to":null,"offers":[{"item":"","offer":"","price":"","from":null,"to":null}]}.\nTESTO:\n"""${chunk}"""`;
 async function flyBuild(txt,store,name){S.fb=1;S.ferr="";S.fmsg="Leggo il volantino…";render();
  try{const chunks=[];for(let i=0;i<txt.length&&chunks.length<5;i+=9000)chunks.push(txt.slice(i,i+9000));
   let from=null,to=null,offers=[];
@@ -443,10 +456,19 @@ async function flyBuild(txt,store,name){S.fb=1;S.ferr="";S.fmsg="Leggo il volant
  catch(e){S.ferr=aiErr(e)}S.fb=0;render()}
 async function flyPdf(inp){const f=inp.files&&inp.files[0];if(!f)return;const store=$("of")?$("of").value:"";S.ofs=store;
  S.fb=1;S.ferr="";S.fmsg="Apro il PDF…";render();
- try{const lib=await loadPdf(),txt=await pdfText(f,lib);
-  if(txt.replace(/\s/g,"").length<200)throw new Error("Questo PDF non contiene testo leggibile (probabilmente è fatto di immagini). Prova con un altro PDF, oppure incolla il testo copiato dal volantino.");
+ try{const lib=await loadPdf(),R=await pdfText(f,lib,m=>{S.fmsg=m;const e=$("fmsg");if(e)e.textContent="⏳ "+m}),txt=R.text;S.focr=R.ocr>0;
+  if(txt.replace(/\s/g,"").length<200)throw new Error("Non sono riuscito a leggere testo da questo PDF, neanche dalle immagini. Prova con un altro file, oppure incolla il testo copiato dal volantino.");
   await flyBuild(txt,store,f.name.replace(/\.pdf$/i,""))}
  catch(e){S.ferr=aiErr(e);S.fb=0;render()}}
+async function flyImg(inp){const fs=[...(inp.files||[])].slice(0,16);if(!fs.length)return;const store=$("of")?$("of").value:"";S.ofs=store;
+ S.fb=1;S.ferr="";S.fmsg="Preparo le immagini…";render();
+ try{const w=await ocrWorker();const out=[];
+  for(let i=0;i<fs.length;i++){const m=`Riconosco il testo dalle immagini… ${i+1} di ${fs.length}`;S.fmsg=m;const e=$("fmsg");if(e)e.textContent="⏳ "+m;
+   const url=URL.createObjectURL(fs[i]);try{const r=await w.recognize(url);out.push((r.data&&r.data.text)||"")}finally{URL.revokeObjectURL(url)}}
+  const txt=out.join("\n\n");S.focr=true;
+  if(txt.replace(/\s/g,"").length<100)throw new Error("Non sono riuscito a leggere testo dalle immagini. Prova con foto più nitide e dritte, oppure incolla il testo.");
+  await flyBuild(txt,store,fs.length>1?"Volantino (foto)":fs[0].name.replace(/\.[^.]+$/,""))}
+ catch(e){ocrW=null;S.ferr=aiErr(e);S.fb=0;render()}}
 function flyPaste(){const tx=($("ot").value||"").trim(),store=$("of")?$("of").value:"";S.ofs=store;if(tx.length<60)return toast("Incolla il testo del volantino.");flyBuild(tx,store,"Volantino incollato")}
 function flyDel(id){if(S.fdel!==id){S.fdel=id;setTimeout(()=>{S.fdel=null},6000);return toast("Eliminare questo volantino? Premi di nuovo 🗑️ entro 6 secondi.")}S.fdel=null;S.fly=S.fly.filter(f=>f.id!==id);save();render()}
 function offMatch(qt,o){const ot=toks(o.item||o.offer||"",1);return !!qt.length&&qt.every(t=>ot.includes(t))&&!ot.some(t=>VAR.has(t)&&!qt.includes(t))}
@@ -460,7 +482,7 @@ function offAlertHtml(){const hs=offHits();if(!hs.length)return"";
 function offBanner(){const hs=offHits();if(!hs.length)return"";return `<div class="al" style="cursor:pointer" onclick="S.tab='negozi';render()">🔥 In offerta ciò che usi spesso: <b>${hs.slice(0,4).map(x=>esc(x.q.name)).join(", ")}</b> — tocca per i dettagli</div>`}
 function vFlyers(){
  const stores=S.geo.stores,ta="width:100%;margin-top:8px;padding:10px;border:1px solid var(--bd);border-radius:22px;background:var(--card);color:var(--tx);font:inherit";
- let h=`<div class="card"><b>🏷️ Volantini e offerte</b><div class="mu">Scegli il negozio e carica il PDF del volantino: l’AI legge il testo del PDF, estrae le offerte e la loro data di scadenza. Se il PDF è fatto solo di immagini non posso leggerlo: in quel caso incolla il testo.</div><select id="of" style="margin-top:8px" onchange="S.ofs=this.value"><option value="">Quale negozio?</option>${stores.map(s=>`<option ${S.ofs===s?"selected":""}>${esc(s)}</option>`).join("")}</select><label class="btn" style="display:block;text-align:center;margin-top:8px;cursor:pointer;${S.fb?"opacity:.5;pointer-events:none":""}">📄 Carica PDF del volantino<input type="file" accept=".pdf,application/pdf" hidden onchange="flyPdf(this)"></label><details style="margin-top:8px"><summary class="mu" style="cursor:pointer">Oppure incolla il testo del volantino</summary><textarea id="ot" rows="5" placeholder="Incolla qui il testo…" style="${ta}"></textarea><button class="btn g" style="margin-top:8px" ${S.fb?"disabled":""} onclick="flyPaste()">Estrai offerte dal testo</button></details>${S.fb?`<div class="mu" id="fmsg" style="margin-top:8px">⏳ ${esc(S.fmsg||"Leggo il volantino…")}</div>`:""}</div>`;
+ let h=`<div class="card"><b>🏷️ Volantini e offerte</b><div class="mu">Scegli il negozio e carica il PDF del volantino: l’AI legge il testo del PDF, estrae le offerte e la loro data di scadenza. Se il PDF è fatto di immagini, tutte le pagine vengono convertite in immagini e lette con un lettore OCR (serve internet, ogni pagina richiede qualche secondo).</div><select id="of" style="margin-top:8px" onchange="S.ofs=this.value"><option value="">Quale negozio?</option>${stores.map(s=>`<option ${S.ofs===s?"selected":""}>${esc(s)}</option>`).join("")}</select><label class="btn" style="display:block;text-align:center;margin-top:8px;cursor:pointer;${S.fb?"opacity:.5;pointer-events:none":""}">📄 Carica PDF del volantino<input type="file" accept=".pdf,application/pdf" hidden onchange="flyPdf(this)"></label><label class="btn" style="display:block;text-align:center;margin-top:8px;cursor:pointer;${S.fb?"opacity:.5;pointer-events:none":""}">🖼️ Oppure carica foto/immagini del volantino<input type="file" accept="image/*" multiple hidden onchange="flyImg(this)"></label><details style="margin-top:8px"><summary class="mu" style="cursor:pointer">Oppure incolla il testo del volantino</summary><textarea id="ot" rows="5" placeholder="Incolla qui il testo…" style="${ta}"></textarea><button class="btn g" style="margin-top:8px" ${S.fb?"disabled":""} onclick="flyPaste()">Estrai offerte dal testo</button></details>${S.fb?`<div class="mu" id="fmsg" style="margin-top:8px">⏳ ${esc(S.fmsg||"Leggo il volantino…")}</div>`:""}</div>`;
  if(S.ferr)h+=`<div class="al">${esc(S.ferr)}</div>`;
  h+=offAlertHtml();
  if(!S.fly.length)return h+`<p class="mu">Nessun volantino caricato.</p>`;
