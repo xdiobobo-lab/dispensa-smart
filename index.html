@@ -58,14 +58,15 @@ async function pick(key){
  const ids=await groqModels(key);if(!ids.length)return null;
  return PREF.find(m=>ids.includes(m))||ids[0];
 }
-async function ask(prompt,retry){
+async function ask(prompt,retry,mtx){
  const key=localStorage.getItem(KEY);
  if(!key)throw new Error("Per usare l’AI serve la tua chiave API: tocca “🔑 Chiave AI” in alto.");
  const p=prov(key),m=model(p);let r;
  try{
   if(p==="ant")r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:m,max_tokens:8000,system:SYS,messages:[{role:"user",content:prompt}]})});
   else{
-   const body={model:m,temperature:0.4,max_tokens:8000,messages:[{role:"system",content:SYS},{role:"user",content:prompt}]};
+   const est=Math.ceil((prompt.length+SYS.length)/2.8),mt=mtx||Math.max(1200,Math.min(8000,7400-est));
+   const body={model:m,temperature:0.4,max_tokens:mt,messages:[{role:"system",content:SYS},{role:"user",content:prompt}]};
    if(/gpt-oss/i.test(m))body.reasoning_effort="low";
    r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+key},body:JSON.stringify(body)});
   }
@@ -77,6 +78,10 @@ async function ask(prompt,retry){
    const nm=await pick(key);
    if(nm&&nm!==m){localStorage.setItem("amodel_groq",nm);return ask(prompt,1)}
   }
+  const tm=msg.match(/Limit\s+(\d+),\s*Requested\s+(\d+)/i);
+  if(p==="groq"&&tm&&!mtx){const lim=+tm[1],req=+tm[2],cur=Math.max(1200,Math.min(8000,7400-Math.ceil((prompt.length+SYS.length)/2.8))),nm2=cur-(req-lim)-300;
+   if(nm2>=900)return ask(prompt,retry,nm2);
+   throw new Error("La richiesta è troppo grande per il limite di token al minuto del tuo piano Groq ("+lim+"). Riduci i dati (meno offerte o meno prodotti) oppure passa a un piano con limiti più alti.")}
   if(r.status===401)throw new Error("Chiave API non valida: controllala con “🔑 Chiave AI”.");
   if(r.status===429)throw new Error("Limite di richieste raggiunto: attendi un minuto e riprova.");
   throw new Error(msg||"Errore AI ("+r.status+"). Prova a cambiare modello con ⚙️.");
@@ -377,14 +382,16 @@ function planShop(){const P=S.plan;if(!P)return;let a=0;planCalc(P).short.forEac
  save();render();toast(a?`🛒 ${a} prodott${a===1?"o":"i"} nella lista della spesa`:"Hai già tutto in dispensa.")}
 async function planGen(){S.pmode=S.pmode||lsg("pmode","pantry");const offMode=S.pmode==="offers";
  if(!offMode&&!S.items.length)return toast("Aggiungi prima qualche prodotto in dispensa.");
- const actOff=[];if(offMode){S.fly.filter(flyAct).forEach(f=>f.offers.forEach(o=>{const to=offTo(o,f);if(to&&to<today())return;actOff.push({nome:o.main||o.item,descrizione:o.item,prezzo:o.price,offerta:o.offer||"",negozio:f.store||"",scade_tra_giorni:to?Math.max(0,Math.round((new Date(to)-new Date(today()))/864e5)):null})}));if(!actOff.length)return toast("Non ci sono offerte valide nei volantini: caricane uno nella scheda Dove comprare.")}
+ const actOff=[];if(offMode){S.fly.filter(flyAct).forEach(f=>f.offers.forEach(o=>{const to=offTo(o,f);if(to&&to<today())return;actOff.push({n:o.main||o.item,p:pNum(o.price)})}));if(!actOff.length)return toast("Non ci sono offerte valide nei volantini: caricane uno nella scheda Dove comprare.")}
  const st=weekStart(),P=S.plan&&S.plan.start===st?S.plan:{start:st,days:{}},slots=[],done=[];
  DAYS.forEach(([d])=>MEALS.forEach(([k])=>{const m=P.days[d]&&P.days[d][k];if(m&&m.done)done.push(m.r.title);else slots.push({day:d,meal:k})}));
  if(!slots.length)return toast("Tutti i pasti della settimana sono già completati.");
  S.pbz=true;S.perr="";render();
  try{const pantry=S.items.map(i=>({id:i.id,nome:i.name,quantita:Math.round(i.q),unita:i.u,giorni_a_scadenza:i.exp?days(i.exp):null,posizione:locOf(i)}));
   const pmin=+S.pmin||+lsg("pmin",40),pmax=+S.pmax||+lsg("pmax",70);
-  const OFFP=`Sei uno chef e nutrizionista italiano. Pianifica i pasti di una settimana lavorativa partendo dalle OFFERTE dei volantini (JSON): ${JSON.stringify(actOff.slice(0,150))}\nDispensa (JSON; usala volentieri, partendo dai prodotti in scadenza): ${JSON.stringify(pantry)}\nPasti da pianificare: ${JSON.stringify(slots)}. Porzioni per ${S.pp} person${S.pp===1?"a":"e"}.\nBudget della spesa settimanale: da ${pmin} a ${pmax} euro, calcolato sommando il prezzo di UNA confezione di ogni prodotto in offerta che serve comprare (i prodotti già in dispensa costano 0). Non superare ${pmax} euro e cerca di restare sopra ${pmin}.\nRegole: costruisci i pasti usando soprattutto prodotti in offerta e prodotti in dispensa; per ogni ingrediente preso da un'offerta scrivi in name il nome generico del prodotto, uguale al campo nome dell'offerta; per quelli della dispensa indica l'id esatto; per le basi (acqua, sale, pepe) usa id null; sommando TUTTI i pasti non superare le quantità della dispensa; non ripetere piatti${done.length?" né questi già fatti: "+done.join(", "):""}; varia le portate; pranzi più rapidi, cene più curate.\nRispondi SOLO con un array JSON con un elemento per pasto richiesto: [{"day":"lun","meal":"pranzo","title":"","emoji":"🍝","time":"20 min","ingredients":[{"id":null,"name":"","amount":0,"unit":"g","alt":["alternativa"]}],"steps":["..."]}]. Quantità in g, ml o pz. Da 3 a 5 step brevi, in italiano. Nomi generici senza marche e senza aggettivi di stato (scrivi «latte», non «latte tiepido»); per le farine indica sempre il tipo.`;
+  const seenO=new Set(),offList=actOff.filter(x=>x.p!=null&&!seenO.has(nm(x.n))&&seenO.add(nm(x.n))).slice(0,90).map(x=>x.n+" "+x.p);
+  const pantryS=JSON.stringify(pantry.slice().sort((a,b)=>(a.giorni_a_scadenza==null?999:a.giorni_a_scadenza)-(b.giorni_a_scadenza==null?999:b.giorni_a_scadenza)).slice(0,40).map(i=>[i.id,i.nome,i.quantita,i.unita]));
+  const OFFP=`Sei uno chef e nutrizionista italiano. Pianifica i pasti di una settimana lavorativa partendo dalle OFFERTE dei volantini (elenco «prodotto prezzo in €»): ${JSON.stringify(offList)}\nDispensa (elenco [id,nome,quantità,unità]; usala volentieri): ${pantryS}\nPasti da pianificare: ${JSON.stringify(slots)}. Porzioni per ${S.pp} person${S.pp===1?"a":"e"}.\nBudget della spesa settimanale: da ${pmin} a ${pmax} euro, calcolato sommando il prezzo di UNA confezione di ogni prodotto in offerta che serve comprare (i prodotti già in dispensa costano 0). Non superare ${pmax} euro e cerca di restare sopra ${pmin}.\nRegole: costruisci i pasti usando soprattutto prodotti in offerta e prodotti in dispensa; per ogni ingrediente preso da un'offerta scrivi in name il nome generico del prodotto, uguale al campo nome dell'offerta; per quelli della dispensa indica l'id esatto; per le basi (acqua, sale, pepe) usa id null; sommando TUTTI i pasti non superare le quantità della dispensa; non ripetere piatti${done.length?" né questi già fatti: "+done.join(", "):""}; varia le portate; pranzi più rapidi, cene più curate.\nRispondi SOLO con un array JSON con un elemento per pasto richiesto: [{"day":"lun","meal":"pranzo","title":"","emoji":"🍝","time":"20 min","ingredients":[{"id":null,"name":"","amount":0,"unit":"g","alt":["alternativa"]}],"steps":["..."]}]. Quantità in g, ml o pz. Da 3 a 5 step brevi, in italiano. Nomi generici senza marche e senza aggettivi di stato (scrivi «latte», non «latte tiepido»); per le farine indica sempre il tipo.`;
   const r=await aiJson(offMode?OFFP:`Sei uno chef e nutrizionista italiano. Pianifica i pasti di una settimana lavorativa usando la dispensa (JSON): ${JSON.stringify(pantry)}\nPasti da pianificare: ${JSON.stringify(slots)}. Porzioni per ${S.pp} person${S.pp===1?"a":"e"}.\nRegole: usa SOLO prodotti della dispensa (più basi non tracciate: acqua, sale, pepe, olio se manca); sommando TUTTI i pasti, non superare la quantità disponibile di ciascun prodotto; usa per primi, nei primi giorni, i prodotti con giorni_a_scadenza bassi; varia le portate (pasta o riso, carne, pesce, uova, legumi, verdure) e non ripetere piatti${done.length?" né questi già fatti: "+done.join(", "):""}; pranzi più rapidi, cene più curate. Per ogni ingrediente della dispensa indica l'id esatto e la quantità nella stessa unità (g, ml o pz); per le basi usa id null.\nRispondi SOLO con un array JSON con un elemento per pasto richiesto: [{"day":"lun","meal":"pranzo","title":"","emoji":"🍝","time":"20 min","ingredients":[{"id":"p1","name":"","amount":0,"unit":"g","alt":["alternativa"]}],"steps":["..."]}]. Da 3 a 5 step brevi, in italiano. Nei nomi degli ingredienti usa nomi generici senza marche e senza aggettivi di stato o temperatura (scrivi «latte», non «latte tiepido»), ma per le farine indica sempre il tipo (00, 0, manitoba, integrale…); indica in alt 1-2 alternative valide, tranne che per le farine.`);
   let n=0;(Array.isArray(r)?r:r.pasti||[]).forEach(x=>{if(!x||!x.title||!Array.isArray(x.steps)||!Array.isArray(x.ingredients))return;const d=x.day,k=x.meal;if(!DAYS.some(a=>a[0]===d)||!MEALS.some(a=>a[0]===k))return;const cur=P.days[d]&&P.days[d][k];if(cur&&cur.done)return;
    P.days[d]=P.days[d]||{};P.days[d][k]={done:false,r:{title:x.title,emoji:x.emoji||"🍽️",time:x.time||"",ingredients:x.ingredients,steps:x.steps,src:"ai",base:S.pp}};n++});
