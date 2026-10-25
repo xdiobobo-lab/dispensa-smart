@@ -86,7 +86,32 @@ async function ask(prompt,retry){
  const a=t.search(/[\[{]/),z=Math.max(t.lastIndexOf("]"),t.lastIndexOf("}"));
  try{return JSON.parse(t.slice(a,z+1))}catch(e){throw new Error("Risposta AI non leggibile, riprova.")}
 }
-window.claude={use:async n=>n==="sample"?{json:ask}:null};
+async function vision(prompt,images){
+ const key=localStorage.getItem(KEY);
+ if(!key)throw new Error("Per usare l’AI serve la tua chiave API: tocca “🔑 Chiave AI” in alto.");
+ const p=prov(key);let r;
+ const m=localStorage.getItem("amodel_vision")||(p==="ant"?DEF.ant:"qwen/qwen3.8-27b");
+ try{
+  if(p==="ant"){
+   const content=images.map(u=>({type:"image",source:{type:"base64",media_type:"image/jpeg",data:u.split(",")[1]}}));content.push({type:"text",text:prompt});
+   r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:m,max_tokens:8000,system:SYS,messages:[{role:"user",content}]})});
+  }else{
+   const content=[{type:"text",text:prompt},...images.map(u=>({type:"image_url",image_url:{url:u}}))];
+   r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+key},body:JSON.stringify({model:m,temperature:0.2,max_tokens:8000,messages:[{role:"system",content:SYS},{role:"user",content}]})});
+  }
+ }catch(e){throw new Error("Connessione non riuscita: controlla internet.")}
+ const d=await r.json().catch(()=>({}));
+ if(!r.ok){const msg=(d.error&&d.error.message)||"";
+  if(r.status===401)throw new Error("Chiave API non valida: controllala con “🔑 Chiave AI”.");
+  if(r.status===429)throw new Error("Limite di richieste raggiunto: attendi un minuto e riprova.");
+  if(r.status===413||/too large|payload/i.test(msg))throw new Error("Le immagini sono troppo pesanti per il modello: riprova con meno pagine.");
+  throw new Error(msg||"Errore AI nella lettura delle immagini ("+r.status+"). Il modello "+m+" potrebbe non supportare le immagini.")}
+ let t=p==="ant"?(d.content||[]).filter(x=>x.type==="text").map(x=>x.text).join(""):(((d.choices||[])[0]||{}).message||{}).content||"";
+ t=t.replace(/<think>[\s\S]*?<\/think>/g,"");
+ const a=t.search(/[\[{]/),z=Math.max(t.lastIndexOf("]"),t.lastIndexOf("}"));
+ try{return JSON.parse(t.slice(a,z+1))}catch(e){throw new Error("Risposta AI non leggibile, riprova.")}
+}
+window.claude={use:async n=>n==="sample"?{json:ask}:null,vision};
 function upd(){const b=document.getElementById("kb");if(b){const k=localStorage.getItem(KEY);b.textContent=k?"🔑 Chiave AI ✓ ("+(prov(k)==="ant"?"Claude":"Groq")+")":"🔑 Chiave AI"}}
 window.setKey=()=>{const k=prompt("Incolla la tua chiave API: GroqCloud (inizia con gsk_) oppure Anthropic (sk-ant-). Resta salvata solo in questo browser. Lascia vuoto per rimuoverla.",localStorage.getItem(KEY)||"");if(k===null)return;k.trim()?localStorage.setItem(KEY,k.trim()):localStorage.removeItem(KEY);upd()};
 window.setModel=async()=>{
@@ -506,6 +531,30 @@ async function autoFly(manual){let d=null;
  if(JSON.stringify(ok.map(f=>f.id))!==before){save();render();if(manual)toast(`🔄 ${ok.length} volantini aggiornati automaticamente`)}else if(manual)toast("Volantini già aggiornati.")}
 function flyRe(id){const f=S.fly.find(x=>x.id===id),t=f&&FT[f.tid||f.id];if(!t)return toast("Il testo di questo volantino non è salvato su questo dispositivo.");
  const L=flyLocal(t.text);f.offers=L.offers.map(o=>({item:o.item,offer:o.offer,price:o.price,from:null,to:null}));f.eng="local";if(L.dates){f.from=L.dates.from;f.to=L.dates.to}save();render();toast(`🔄 ${f.offers.length} offerte rielaborate dal testo salvato`)}
+async function pageJpg(pdf,p){const pg=await pdf.getPage(p),v0=pg.getViewport({scale:1}),sc=Math.min(2.2,1400/v0.width),vp=pg.getViewport({scale:sc}),cv=document.createElement("canvas");cv.width=Math.round(vp.width);cv.height=Math.round(vp.height);const g=cv.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,cv.width,cv.height);await pg.render({canvasContext:g,viewport:vp}).promise;const u=cv.toDataURL("image/jpeg",.82);cv.width=cv.height=1;return u}
+async function fileJpg(f){const bm=await createImageBitmap(f),sc=Math.min(1,1600/Math.max(bm.width,bm.height)),cv=document.createElement("canvas");cv.width=Math.round(bm.width*sc);cv.height=Math.round(bm.height*sc);const g=cv.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,cv.width,cv.height);g.drawImage(bm,0,0,cv.width,cv.height);const u=cv.toDataURL("image/jpeg",.85);cv.width=cv.height=1;return u}
+async function flyVision(inp){const fs=[...(inp.files||[])];if(!fs.length)return;const store=$("of")?$("of").value:"";S.ofs=store;
+ S.fb=1;S.ferr="";S.fmsg="Preparo le pagine…";render();
+ const say=m=>{S.fmsg=m;const e=$("fmsg");if(e)e.textContent="⏳ "+m},wait=ms=>new Promise(x=>setTimeout(x,ms));
+ try{const pages=[];
+  for(const f of fs){if(/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name)){const lib=await loadPdf(),pdf=await lib.getDocument({data:await f.arrayBuffer()}).promise;for(let p=1;p<=Math.min(pdf.numPages,24);p++)pages.push(()=>pageJpg(pdf,p))}else pages.push(()=>fileJpg(f))}
+  if(pages.length>24)pages.length=24;
+  const P=flyPrompt("",store).replace(/TESTO:[\s\S]*$/,"").replace("Questo è il testo estratto da un volantino","Queste sono immagini delle pagine di un volantino").replace(" (le colonne possono essere mescolate)","")+" Leggi direttamente le immagini.";
+  let from=null,to=null,offers=[],fail=0,lastErr=null;const nb=Math.ceil(pages.length/3);
+  for(let bi=0;bi<nb;bi++){say(`Leggo le pagine con Qwen… gruppo ${bi+1} di ${nb}`);if(bi)await wait(8000);
+   let r=null;
+   try{const imgs=[];for(const g of pages.slice(bi*3,bi*3+3))imgs.push(await g());
+    for(let t=0;t<3&&!r;t++){try{r=await claude.vision(P,imgs)}catch(er){lastErr=er;if(/Limite/.test(er.message||"")&&t<2){say(`Limite dell’AI raggiunto: aspetto 30 secondi e riprovo (gruppo ${bi+1} di ${nb})…`);await wait(30000)}else break}}}
+   catch(er){lastErr=er}
+   if(!r){fail++;continue}
+   const o=Array.isArray(r)?{offers:r}:(r||{});if(!from&&okD(o.from))from=o.from;if(!to&&okD(o.to))to=o.to;
+   (o.offers||[]).forEach(x=>{if(x&&(x.item||x.offer))offers.push({item:String(x.item||x.offer).slice(0,90),main:String(x.main||"").slice(0,50),offer:String(x.offer||"").slice(0,160),price:String(x.price||"").slice(0,30),from:okD(x.from)?x.from:null,to:okD(x.to)?x.to:null})})}
+  const seen=new Set();offers=offers.filter(o=>{const k=nm(o.item)+"|"+o.price;if(seen.has(k))return false;seen.add(k);return true});
+  if(!offers.length){if(lastErr)throw lastErr;throw new Error("Non ho trovato offerte nelle immagini.")}
+  const id="f"+Date.now(),nmf=fs.length===1?fs[0].name.replace(/\.[^.]+$/,""):"Volantino (immagini)";
+  S.fly.unshift({id,eng:"vision",store:store||"",name:nmf,added:today(),from,to,offers});if(S.fly.length>12)S.fly.length=12;S.fopen=id;save();
+  toast(`🏷️ ${offers.length} offerte lette dalle immagini`+(to?`, valide fino al ${fD(to)}`:". Data di scadenza non indicata")+(fail?`. ⚠️ ${fail} gruppo${fail>1?"i":""} di pagine su ${nb} non lett${fail>1?"i":"o"}: il volantino potrebbe essere incompleto`:""))}
+ catch(e){S.ferr=aiErr(e)}S.fb=0;render()}
 async function flyPdf(inp){const f=inp.files&&inp.files[0];if(!f)return;const store=$("of")?$("of").value:"";S.ofs=store;
  S.fb=1;S.ferr="";S.fmsg="Apro il PDF…";render();
  try{const key=f.name+"|"+f.size,old=Object.values(FT).find(v=>v.key===key);
@@ -543,7 +592,7 @@ function offAlertHtml(){const hs=offHits();if(!hs.length)return"";
 function offBanner(){const hs=offHits();if(!hs.length)return"";return `<div class="al" style="cursor:pointer" onclick="S.tab='negozi';render()">🔥 In offerta ciò che usi spesso: <b>${hs.slice(0,4).map(x=>esc(x.q.name)).join(", ")}</b> — tocca per i dettagli</div>`}
 function vFlyers(){
  const stores=S.geo.stores,ta="width:100%;margin-top:8px;padding:10px;border:1px solid var(--bd);border-radius:22px;background:var(--card);color:var(--tx);font:inherit";
- let h=`<div class="card"><b>🏷️ Volantini e offerte</b><div class="mu">Scegli il negozio e carica il PDF: le pagine vengono convertite in immagini e lette con l’OCR (serve internet, qualche secondo a pagina). Poi l’AI estrae le offerte e le date di scadenza.</div><select id="of" style="margin-top:8px" onchange="S.ofs=this.value"><option value="">Quale negozio?</option>${stores.map(s=>`<option ${S.ofs===s?"selected":""}>${esc(s)}</option>`).join("")}</select>${S.ofs?`<a class="btn g" style="display:block;text-align:center;margin-top:8px;text-decoration:none" target="_blank" rel="noopener" href="https://www.google.com/search?q=${encodeURIComponent("volantino "+S.ofs+" "+(S.geo.city||"")+" pdf")}">🔎 Cerca il volantino di ${esc(S.ofs)}</a><a class="btn g" style="display:block;text-align:center;margin-top:8px;text-decoration:none" target="_blank" rel="noopener" href="https://www.doveconviene.it/volantino/${encodeURIComponent(nm(S.ofs).replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''))}">🛍️ Apri su DoveConviene</a><div class="mu" style="margin-top:4px">Apri il volantino, scaricalo o fai uno screenshot delle pagine, poi caricalo qui sotto.</div>`:""}<label class="btn" style="display:block;text-align:center;margin-top:8px;cursor:pointer;${S.fb?"opacity:.5;pointer-events:none":""}">📄 Carica PDF del volantino<input type="file" accept=".pdf,application/pdf" hidden onchange="flyPdf(this)"></label><label class="btn" style="display:block;text-align:center;margin-top:8px;cursor:pointer;${S.fb?"opacity:.5;pointer-events:none":""}">🖼️ Oppure carica foto/immagini del volantino<input type="file" accept="image/*" multiple hidden onchange="flyImg(this)"></label><details style="margin-top:8px"><summary class="mu" style="cursor:pointer">Oppure incolla il testo del volantino</summary><textarea id="ot" rows="5" placeholder="Incolla qui il testo…" style="${ta}"></textarea><button class="btn g" style="margin-top:8px" ${S.fb?"disabled":""} onclick="flyPaste()">Estrai offerte dal testo</button></details>${S.fb?`<div class="mu" id="fmsg" style="margin-top:8px">⏳ ${esc(S.fmsg||"Leggo il volantino…")}</div>`:""}</div>`;
+ let h=`<div class="card"><b>🏷️ Volantini e offerte</b><div class="mu">Scegli il negozio e carica il PDF: le pagine vengono convertite in immagini e lette con l’OCR (serve internet, qualche secondo a pagina). Poi l’AI estrae le offerte e le date di scadenza.</div><select id="of" style="margin-top:8px" onchange="S.ofs=this.value"><option value="">Quale negozio?</option>${stores.map(s=>`<option ${S.ofs===s?"selected":""}>${esc(s)}</option>`).join("")}</select>${S.ofs?`<a class="btn g" style="display:block;text-align:center;margin-top:8px;text-decoration:none" target="_blank" rel="noopener" href="https://www.google.com/search?q=${encodeURIComponent("volantino "+S.ofs+" "+(S.geo.city||"")+" pdf")}">🔎 Cerca il volantino di ${esc(S.ofs)}</a><a class="btn g" style="display:block;text-align:center;margin-top:8px;text-decoration:none" target="_blank" rel="noopener" href="https://www.doveconviene.it/volantino/${encodeURIComponent(nm(S.ofs).replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''))}">🛍️ Apri su DoveConviene</a><div class="mu" style="margin-top:4px">Apri il volantino, scaricalo o fai uno screenshot delle pagine, poi caricalo qui sotto.</div>`:""}<label class="btn" style="display:block;text-align:center;margin-top:8px;cursor:pointer;${S.fb?"opacity:.5;pointer-events:none":""}">📄 Carica PDF del volantino<input type="file" accept=".pdf,application/pdf" hidden onchange="flyPdf(this)"></label><label class="btn" style="display:block;text-align:center;margin-top:8px;cursor:pointer;${S.fb?"opacity:.5;pointer-events:none":""}">🖼️ Oppure carica foto/immagini del volantino<input type="file" accept="image/*" multiple hidden onchange="flyImg(this)"></label>${window.claude&&claude.vision?`<label class="btn" style="display:block;text-align:center;margin-top:8px;cursor:pointer;${S.fb?"opacity:.5;pointer-events:none":""}">👁️ Leggi con Qwen (PDF o immagini, senza OCR)<input type="file" accept=".pdf,application/pdf,image/*" multiple hidden onchange="flyVision(this)"></label><div class="mu" style="margin-top:4px">Le pagine vengono mandate come immagini a un modello che le legge direttamente (Qwen su Groq, oppure Claude se usi la chiave Anthropic). 3 pagine alla volta, fino a 24.</div>`:""}<details style="margin-top:8px"><summary class="mu" style="cursor:pointer">Oppure incolla il testo del volantino</summary><textarea id="ot" rows="5" placeholder="Incolla qui il testo…" style="${ta}"></textarea><button class="btn g" style="margin-top:8px" ${S.fb?"disabled":""} onclick="flyPaste()">Estrai offerte dal testo</button></details>${S.fb?`<div class="mu" id="fmsg" style="margin-top:8px">⏳ ${esc(S.fmsg||"Leggo il volantino…")}</div>`:""}</div>`;
  if(S.ferr)h+=`<div class="al">${esc(S.ferr)}</div>`;
  h+=offAlertHtml();
  if(!S.fly.length)return h+`<p class="mu">Nessun volantino caricato.</p>`;
