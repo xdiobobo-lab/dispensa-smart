@@ -465,7 +465,9 @@ function flyLocal(txt){const lines=String(txt).split(/\n+/).map(l=>l.replace(/[|
   else if(lt(ln)>=3){buf.push(ln.slice(0,80));if(buf.length>3)buf.shift()}}
  return{offers:out,dates:flyDates(txt)}}
 async function flyBuild(txt,store,name,key){S.fb=1;S.ferr="";S.fmsg="Leggo il volantino…";render();
- try{const chunks=[];for(let i=0;i<txt.length&&chunks.length<8;i+=5000)chunks.push(txt.slice(i,i+5000));
+ try{let src=txt;
+  if(txt.length>25000){try{const L=flyLocal(txt);if(L.offers.length>=15){const dm=txt.match(/.{0,40}\bdal\s+\d{1,2}.{0,80}\bal\s+\d{1,2}.{0,40}/i);src=(dm?dm[0]+"\n":"")+L.offers.map(o=>o._raw).join("\n")}}catch(e){}}
+  const chunks=[];for(let i=0;i<src.length&&chunks.length<14;i+=5000)chunks.push(src.slice(i,i+5000));
   let from=null,to=null,offers=[],fail=0,lastErr=null;const wait=ms=>new Promise(x=>setTimeout(x,ms));
   for(let ci=0;ci<chunks.length;ci++){const say=m=>{S.fmsg=m;const e=$("fmsg");if(e)e.textContent="⏳ "+m};say(`Leggo il volantino… parte ${ci+1} di ${chunks.length}`);
    if(ci)await wait(6000);
