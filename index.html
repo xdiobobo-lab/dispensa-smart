@@ -48,10 +48,14 @@ const KEY="akey",DEF={groq:"openai/gpt-oss-120b",ant:"claude-sonnet-5-5"};
 const PREF=["openai/gpt-oss-120b","llama-3.3-70b-versatile","openai/gpt-oss-20b","llama-3.1-8b-instant"];
 const NOCHAT=/whisper|guard|tts|orpheus|playai|embed|safeguard|compound/i;
 const prov=k=>String(k).startsWith("sk-ant")?"ant":"groq";
+try{const hm=location.hash.match(/[#&]ai=([^&]+)/);if(hm){const o=JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(hm[1])))));if(o&&o.u&&o.c){localStorage.setItem("aproxy",JSON.stringify({u:String(o.u),c:String(o.c)}));history.replaceState(null,"",location.pathname+location.search)}}}catch(e){}
+const PX=()=>{try{const p=JSON.parse(localStorage.getItem("aproxy")||"null");return p&&p.u&&p.c?p:null}catch(e){return null}};
+const EP=path=>PX()?PX().u.replace(/\/+$/,"")+"/v1"+path:"https://api.groq.com/openai/v1"+path;
+const HD=key=>PX()?{"content-type":"application/json","x-access-code":PX().c}:{"content-type":"application/json",authorization:"Bearer "+key};
 const model=p=>localStorage.getItem("amodel_"+p)||DEF[p];
 const SYS="Rispondi sempre e solo con JSON valido, senza testo prima o dopo e senza blocchi di codice.";
 async function groqModels(key){
- try{const r=await fetch("https://api.groq.com/openai/v1/models",{headers:{authorization:"Bearer "+key}});const d=await r.json();
+ try{const r=await fetch(EP("/models"),{headers:HD(key)});const d=await r.json();
   return (d.data||[]).map(m=>m.id).filter(id=>id&&!NOCHAT.test(id))}catch(e){return[]}
 }
 async function pick(key){
@@ -59,16 +63,16 @@ async function pick(key){
  return PREF.find(m=>ids.includes(m))||ids[0];
 }
 async function ask(prompt,retry,mtx){
- const key=localStorage.getItem(KEY);
- if(!key)throw new Error("Per usare l’AI serve la tua chiave API: tocca “🔑 Chiave AI” in alto.");
- const p=prov(key),m=model(p);let r;
+ const key=localStorage.getItem(KEY)||"";
+ if(!key&&!PX())throw new Error("Per usare l’AI serve la tua chiave API: tocca “🔑 Chiave AI” in alto.");
+ const p=PX()?"groq":prov(key),m=model(p);let r;
  try{
   if(p==="ant")r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:m,max_tokens:8000,system:SYS,messages:[{role:"user",content:prompt}]})});
   else{
    const est=Math.ceil((prompt.length+SYS.length)/2.8),mt=mtx||Math.max(1200,Math.min(8000,7400-est));
    const body={model:m,temperature:0.4,max_tokens:mt,messages:[{role:"system",content:SYS},{role:"user",content:prompt}]};
    if(/gpt-oss/i.test(m))body.reasoning_effort="low";
-   r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+key},body:JSON.stringify(body)});
+   r=await fetch(EP("/chat/completions"),{method:"POST",headers:HD(key),body:JSON.stringify(body)});
   }
  }catch(e){throw new Error("Connessione non riuscita: controlla internet.")}
  const d=await r.json().catch(()=>({}));
@@ -82,7 +86,7 @@ async function ask(prompt,retry,mtx){
   if(p==="groq"&&tm&&!mtx){const lim=+tm[1],req=+tm[2],cur=Math.max(1200,Math.min(8000,7400-Math.ceil((prompt.length+SYS.length)/2.8))),nm2=cur-(req-lim)-300;
    if(nm2>=900)return ask(prompt,retry,nm2);
    throw new Error("La richiesta è troppo grande per il limite di token al minuto del tuo piano Groq ("+lim+"). Riduci i dati (meno offerte o meno prodotti) oppure passa a un piano con limiti più alti.")}
-  if(r.status===401)throw new Error("Chiave API non valida: controllala con “🔑 Chiave AI”.");
+  if(r.status===401)throw new Error(PX()?"Codice di accesso non valido: chiedi un nuovo link a chi te l’ha dato.":"Chiave API non valida: controllala con “🔑 Chiave AI”.");
   if(r.status===429)throw new Error("Limite di richieste raggiunto: attendi un minuto e riprova.");
   throw new Error(msg||"Errore AI ("+r.status+"). Prova a cambiare modello con ⚙️.");
  }
@@ -92,9 +96,9 @@ async function ask(prompt,retry,mtx){
  try{return JSON.parse(t.slice(a,z+1))}catch(e){throw new Error("Risposta AI non leggibile, riprova.")}
 }
 async function vision(prompt,images){
- const key=localStorage.getItem(KEY);
- if(!key)throw new Error("Per usare l’AI serve la tua chiave API: tocca “🔑 Chiave AI” in alto.");
- const p=prov(key);let r;
+ const key=localStorage.getItem(KEY)||"";
+ if(!key&&!PX())throw new Error("Per usare l’AI serve la tua chiave API: tocca “🔑 Chiave AI” in alto.");
+ const p=PX()?"groq":prov(key);let r;
  const m=localStorage.getItem("amodel_vision")||(p==="ant"?DEF.ant:"qwen/qwen3.8-27b");
  try{
   if(p==="ant"){
@@ -102,12 +106,12 @@ async function vision(prompt,images){
    r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:m,max_tokens:8000,system:SYS,messages:[{role:"user",content}]})});
   }else{
    const content=[{type:"text",text:prompt},...images.map(u=>({type:"image_url",image_url:{url:u}}))];
-   r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+key},body:JSON.stringify({model:m,temperature:0.2,max_tokens:8000,messages:[{role:"system",content:SYS},{role:"user",content}]})});
+   r=await fetch(EP("/chat/completions"),{method:"POST",headers:HD(key),body:JSON.stringify({model:m,temperature:0.2,max_tokens:8000,messages:[{role:"system",content:SYS},{role:"user",content}]})});
   }
  }catch(e){throw new Error("Connessione non riuscita: controlla internet.")}
  const d=await r.json().catch(()=>({}));
  if(!r.ok){const msg=(d.error&&d.error.message)||"";
-  if(r.status===401)throw new Error("Chiave API non valida: controllala con “🔑 Chiave AI”.");
+  if(r.status===401)throw new Error(PX()?"Codice di accesso non valido: chiedi un nuovo link a chi te l’ha dato.":"Chiave API non valida: controllala con “🔑 Chiave AI”.");
   if(r.status===429)throw new Error("Limite di richieste raggiunto: attendi un minuto e riprova.");
   if(r.status===413||/too large|payload/i.test(msg))throw new Error("Le immagini sono troppo pesanti per il modello: riprova con meno pagine.");
   throw new Error(msg||"Errore AI nella lettura delle immagini ("+r.status+"). Il modello "+m+" potrebbe non supportare le immagini.")}
@@ -117,8 +121,10 @@ async function vision(prompt,images){
  try{return JSON.parse(t.slice(a,z+1))}catch(e){throw new Error("Risposta AI non leggibile, riprova.")}
 }
 window.claude={use:async n=>n==="sample"?{json:ask}:null,vision};
-function upd(){const b=document.getElementById("kb");if(b){const k=localStorage.getItem(KEY);b.textContent=k?"🔑 Chiave AI ✓ ("+(prov(k)==="ant"?"Claude":"Groq")+")":"🔑 Chiave AI"}}
-window.setKey=()=>{const k=prompt("Incolla la tua chiave API: GroqCloud (inizia con gsk_) oppure Anthropic (sk-ant-). Resta salvata solo in questo browser. Lascia vuoto per rimuoverla.",localStorage.getItem(KEY)||"");if(k===null)return;k.trim()?localStorage.setItem(KEY,k.trim()):localStorage.removeItem(KEY);upd()};
+function upd(){const b=document.getElementById("kb");if(b){const k=localStorage.getItem(KEY);b.textContent=PX()?"🔑 Accesso famiglia ✓":k?"🔑 Chiave AI ✓ ("+(prov(k)==="ant"?"Claude":"Groq")+")":"🔑 Chiave AI"}}
+window.setKey=()=>{const k=prompt("Incolla la tua chiave API: GroqCloud (inizia con gsk_) oppure Anthropic (sk-ant-). Se hai ricevuto un accesso dalla famiglia, incolla invece il testo indirizzo|codice (oppure apri il link che ti hanno mandato). Resta salvato solo in questo browser. Lascia vuoto per rimuovere.",PX()?PX().u+"|"+PX().c:(localStorage.getItem(KEY)||""));if(k===null)return;const t=k.trim();
+ if(/^https:\/\/[^|\s]+\|\S+$/.test(t)){const i=t.indexOf("|");localStorage.setItem("aproxy",JSON.stringify({u:t.slice(0,i),c:t.slice(i+1)}));localStorage.removeItem(KEY)}
+ else if(t){localStorage.setItem(KEY,t);localStorage.removeItem("aproxy")}else{localStorage.removeItem(KEY);localStorage.removeItem("aproxy")}upd()};
 window.setModel=async()=>{
  const key=localStorage.getItem(KEY)||"",p=prov(key);let extra="";
  if(key&&p==="groq"){const ids=await groqModels(key);if(ids.length)extra="\n\nModelli disponibili con la tua chiave:\n"+ids.join("\n")}
@@ -149,7 +155,7 @@ function toast(m){$("t").innerHTML=`<div class="toast">${m}</div>`;setTimeout(()
 function render(){if(S.tab!=="nuova")S.edId=null;
  const tabs=[["oggi","🏠 Oggi"],["dispensa","Dispensa"],["add","Aggiungi spesa"],["ricette","Ricette AI"],["cerca","Cerca online"],["nuova","Nuova ricetta"],["ricettario","Ricettario"],["lista","Lista spesa"+(S.shop.filter(x=>!x.done).length?" ("+S.shop.filter(x=>!x.done).length+")":"")],["negozi","📍 Dove comprare"],["pref","Preferiti"],["cron","Cronologia"]];
  drawNav();
- $("v").innerHTML=({oggi:vOggi,dispensa:vDisp,add:vAdd,ricette:vRic,cerca:vSearch,nuova:vNew,ricettario:vBook,lista:vShop,negozi:vStores,piano:vPlan,colori:vTheme,pref:vPref,cron:vHist})[S.tab]()+(S.tab==="dispensa"?vBackup()+bkCard()+(window.setKey?ghCard():""):"");
+ $("v").innerHTML=({oggi:vOggi,dispensa:vDisp,add:vAdd,ricette:vRic,cerca:vSearch,nuova:vNew,ricettario:vBook,lista:vShop,negozi:vStores,piano:vPlan,colori:vTheme,guida:vGuida,pref:vPref,cron:vHist})[S.tab]()+(S.tab==="dispensa"?vBackup()+bkCard()+(window.setKey?ghCard():""):"");
 }
 const EM=[["uov","🥚"],["pasta","🍝"],["spaghet","🍝"],["riso","🍚"],["farina","🌾"],["pane","🍞"],["latte","🥛"],["yogurt","🥛"],["panna","🥛"],["formagg","🧀"],["parmigiano","🧀"],["mozzarella","🧀"],["ricotta","🧀"],["burro","🧈"],["pollo","🍗"],["manzo","🥩"],["maiale","🥩"],["carne","🥩"],["prosciutto","🥓"],["salame","🥓"],["tonno","🐟"],["salmone","🐟"],["pesce","🐟"],["pomodor","🍅"],["passata","🍅"],["insalata","🥬"],["spinaci","🥬"],["zucchin","🥒"],["carot","🥕"],["patat","🥔"],["cipolla","🧅"],["aglio","🧄"],["limon","🍋"],["melanzan","🍆"],["mela","🍎"],["banana","🍌"],["arancia","🍊"],["fragol","🍓"],["uva","🍇"],["peperon","🫑"],["funghi","🍄"],["fagioli","🫘"],["ceci","🫘"],["lenticch","🫘"],["piselli","🌱"],["olio","🫒"],["sale","🧂"],["zucchero","🍬"],["miele","🍯"],["cioccolat","🍫"],["biscott","🍪"],["acqua","💧"],["succo","🧃"],["vino","🍷"],["birra","🍺"],["caffè","☕"]];
 const CE={"Cereali e derivati":"🌾","Latticini e uova":"🥛","Carne e pesce":"🥩","Frutta e verdura":"🥦","Legumi":"🫘","Condimenti e oli":"🫒","Dolci e snack":"🍪","Bevande":"🥤","Altro":"🛒"};
@@ -261,7 +267,8 @@ function moveMeta(a,b){if(S.ph[a]){S.ph[b]=S.ph[a];delete S.ph[a];W("ph",S.ph);p
 function editM(i){const r=S.mine[i];if(!r)return;S.edId=r.id;S.tab="nuova";render();fillForm(r);window.scrollTo(0,0)}
 function openM(i){S.cur=S.mine[i];S.step=0;S.done={};S.from="ricettario";S.tab="ricette";render()}
 function delM(i){const r=S.mine[i];if(!r)return;const cs=S.coll.map(c=>[c.id,c.ids.slice(),c.u]);S.mine.splice(i,1);save();render();undoable("🗑️ Ricetta eliminata.",{r,i,cs},u=>{S.mine.splice(Math.min(u.i,S.mine.length),0,u.r);u.cs.forEach(([id,ids,uu])=>{const c=S.coll.find(x=>x.id===id);if(c){c.ids=ids;c.u=uu}})})}
-function vOggi(){
+function vOggi(){const g=welcomeHtml();return g+vOggi0()+(g?"":`<div style="text-align:center;margin:14px 0"><button class="btn g" ${BS} onclick="S.tab='guida';render()">ℹ️ Cosa puoi fare con l’app</button></div>`)}
+function vOggi0(){
  const s=soon(),ids=new Set(s.map(i=>i.id)),op=S.shop.filter(x=>!x.done).length;
  const info=S.mine.map((r,i)=>({r,i,k:"m"})).map(o=>({...o,m:miss(o.r),ex:o.r.ingredients.some(g=>{const a=avail(g);return a.it&&ids.has(a.it.id)})}));
  const now=info.filter(o=>o.m===0).sort((a,b)=>b.ex-a.ex).slice(0,6),almost=info.filter(o=>o.m>0&&o.m<=2).sort((a,b)=>a.m-b.m).slice(0,4);
@@ -354,7 +361,7 @@ function vStores(){const g=S.geo,stores=g.stores,open=S.shop.filter(x=>!x.done),
  h+=vFlyers();if(0)h+=`<div class="card"><b>🏷️ Offerte da volantino</b><div class="mu">L’AI non può leggere i volantini online. Apri il volantino del negozio (link “Volantino ↗” sopra), copia il testo delle offerte e incollalo qui: l’AI trova quelle utili per la tua lista, usando solo ciò che è scritto.</div><select id="of" style="margin-top:8px"><option value="">Quale negozio?</option>${stores.map(s=>`<option ${S.ofs===s?"selected":""}>${esc(s)}</option>`).join("")}</select><textarea id="ot" rows="5" placeholder="Incolla qui il testo del volantino…" style="${ta}">${esc(S.ot||"")}</textarea><button class="btn" style="margin-top:8px" ${busy?"disabled":""} onclick="offFind()">${S.gb==="o"?"Leggo il volantino…":"Trova offerte utili"}</button></div>`;
  if(S.ofdone)h+=S.off.length?S.off.map(o=>`<div class="card"><b>${emo(o.item)} ${esc(o.item||"")}</b>${o.price?` <span class="bd">${esc(o.price)}</span>`:""}<div>${esc(o.offer)}</div>${o.validity?`<div class="mu">${esc(o.validity)}</div>`:""}</div>`).join(""):`<p class="mu">Nessuna offerta del testo riguarda i prodotti della tua lista.</p>`;
  return h}
-const GR=[["🏠","Oggi",[["oggi","Oggi"],["colori","🎨 Colori"]]],["🥫","Dispensa",[["dispensa","Dispensa"],["add","Aggiungi spesa"]]],["🍽️","Ricette",[["ricette","Consigliate AI"],["cerca","Cerca online"],["nuova","Nuova ricetta"],["ricettario","Ricettario"],["pref","Preferiti"],["cron","Cronologia"]]],["📅","Piano",[["piano","Settimana"]]],["🛒","Spesa",[["lista","Lista della spesa"],["negozi","Dove comprare"]]]];
+const GR=[["🏠","Oggi",[["oggi","Oggi"],["colori","🎨 Colori"],["guida","ℹ️ Cosa puoi fare"]]],["🥫","Dispensa",[["dispensa","Dispensa"],["add","Aggiungi spesa"]]],["🍽️","Ricette",[["ricette","Consigliate AI"],["cerca","Cerca online"],["nuova","Nuova ricetta"],["ricettario","Ricettario"],["pref","Preferiti"],["cron","Cronologia"]]],["📅","Piano",[["piano","Settimana"]]],["🛒","Spesa",[["lista","Lista della spesa"],["negozi","Dove comprare"]]]];
 function drawNav(){const gi=Math.max(0,GR.findIndex(g=>g[2].some(t=>t[0]===S.tab))),g=GR[gi],n=S.shop.filter(x=>!x.done).length;S.gt=S.gt||{};S.gt[gi]=S.tab;
  $("nav").innerHTML=g[2].length>1?g[2].map(([k,t])=>`<button class="${S.tab===k?"on":""}" onclick="S.tab='${k}';render()">${t}</button>`).join(""):"";
  $("nav").style.display=g[2].length>1?"flex":"none";
@@ -728,7 +735,35 @@ function rcpHtml(){if(!(window.claude&&claude.vision))return"";const R=S.rcp,fi=
   <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap"><input type="number" min="0" step="any" value="${x.qty}" style="width:90px;${inp}" oninput="rcpSet(${i},'qty',this.value)"><select style="width:auto;${inp}" onchange="rcpSet(${i},'unit',this.value)">${["g","ml","pz"].map(u=>`<option ${x.unit===u?"selected":""}>${u}</option>`).join("")}</select><input type="date" value="${x.exp||""}" ${x.nex?"disabled":""} style="width:auto;${inp}" onchange="rcpSet(${i},'exp',this.value)"><label class="mu" style="display:flex;gap:4px;align-items:center;white-space:nowrap"><input type="checkbox" style="width:auto" ${x.nex?"checked":""} onchange="rcpSet(${i},'nex',this.checked);render()"> senza scad.</label></div></div>`).join("")}
   <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn" onclick="rcpAdd()">Aggiungi ${sel} prodott${sel===1?"o":"i"} alla dispensa</button><button class="btn g" onclick="rcpCancel()">Annulla</button></div><div class="mu" style="margin-top:6px">Se un prodotto è già in dispensa la quantità viene sommata; gli articoli corrispondenti vengono tolti dalla lista della spesa.</div></div>`}
  return `<div class="card"><b>🧾 Scansiona lo scontrino</b><div class="mu">Fotografa lo scontrino (o carica un’immagine o un PDF): l’AI legge i prodotti e li aggiunge alla dispensa con quantità e scadenze stimate. Prima di salvare puoi correggere tutto.</div>${R&&R.err?`<div class="al" style="margin-top:8px">${esc(R.err)}</div>`:""}<label class="btn" style="display:block;text-align:center;margin-top:10px;cursor:pointer">📷 Scatta o carica lo scontrino${fi}</label><div class="mu" style="margin-top:6px">Foto nitida, dritta e con tutto lo scontrino visibile. Per scontrini lunghi puoi caricare più foto (fino a 6).</div></div>`}
-function vBackup(){return `<div class="card"><b>💾 Backup e importazione dati</b><div class="mu">“Copia i miei dati” mette tutto in questo riquadro. Per importare, incolla qui un backup e premi Importa: i dati già presenti non vengono cancellati.</div><textarea id="bk" rows="4" placeholder="Incolla qui il backup…" style="width:100%;margin-top:8px;padding:10px;border:1px solid var(--bd);border-radius:22px;background:var(--card);color:var(--tx);font:inherit"></textarea><div class="row" style="margin-top:8px"><button class="btn g" onclick="bkCopy()">Copia i miei dati</button><button class="btn" onclick="bkImp()">Importa</button></div><div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap"><button class="btn g" onclick="bkFile()">⬇️ Salva file JSON</button><label class="btn g" style="cursor:pointer">📂 Carica file JSON<input type="file" accept=".json,application/json" hidden onchange="bkLoad(this)"></label><button class="btn g" onclick="syncSite()">🔄 Aggiorna dal sito</button></div><div class="mu" style="margin-top:8px">Il file <b>dispensa-smart-dati.json</b> contiene prodotti, ricette, lista, cronologia e foto. Se lo metti accanto all’HTML su un sito, viene caricato da solo su un dispositivo ancora vuoto.</div></div>`}
+function vGuida(){
+ const sec=(t,s,rows)=>`<div class="card"><h2 style="margin-top:0">${t}</h2><div class="mu" style="margin-bottom:8px">${s}</div>${rows.map(([a,b])=>`<div style="padding:10px 0;border-top:1px solid var(--bd)"><b>${a}</b><div class="mu" style="margin-top:2px">${b}</div></div>`).join("")}</div>`;
+ return `<div class="card"><h2 style="margin-top:0">👋 Benvenuto in Dispensa Smart</h2><div class="mu">Sai cosa hai in casa, cosa cucinare e cosa comprare: dispensa, ricette, spesa e volantini nello stesso posto, anche dal telefono.</div><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn" onclick="S.tab='add';render()">➕ Aggiungi la prima spesa</button><button class="btn g" onclick="S.tab='oggi';S.guide=true;render()">Guida di primo avvio</button></div></div>`
+ +sec("Ogni giorno","Per decidere cosa cucinare.",[
+ ["🥫 Dispensa","L’elenco di ciò che hai in casa, con quantità e scadenze. Tra le unità ci sono anche cucchiaio, mezzo cucchiaio e cucchiaino."],
+ ["🍽️ Ricette","Ricette proposte dall’AI in base a ciò che hai, ricerca online e inserimento a mano o da link. Le preferite le salvi nel Ricettario e le raggruppi in raccolte."],
+ ["📅 Piano della settimana","Genera i pasti dei giorni a venire. Scegli se usare solo ciò che hai in dispensa oppure partire dalle offerte dei volantini, con un budget minimo e massimo: gli ingredienti in offerta mostrano prezzo e scadenza. I piani passati restano nell’archivio."]])
+ +sec("Quando fai la spesa","Per spendere meno e non dimenticare nulla.",[
+ ["🛒 Lista della spesa","Aggiungi gli articoli e vedi il totale. Gli ingredienti che usi spesso hanno un pulsante carrello per metterli in lista con un tocco."],
+ ["📍 Volantini e offerte","Carica il PDF o le foto del volantino: l’AI legge le offerte e le collega a ciò che ti serve. Con un tocco le aggiungi alla lista, con prezzo, negozio e giorni alla scadenza."],
+ ["🧾 Scontrino","Fotografa lo scontrino: i prodotti finiscono in dispensa con quantità e scadenze stimate. Prima di salvare puoi correggere tutto."]])
+ +sec("Per stare tranquilli","Se sbagli o cambi telefono non perdi niente.",[
+ ["↩️ Annulla","Dopo una cancellazione compare il pulsante Annulla."],
+ ["💾 Copie di sicurezza","Ogni giorno l’app salva una copia dei dati sul dispositivo e, se hai collegato GitHub, anche nel tuo repository. Le trovi in “Dispensa”."],
+ ["☁️ Sincronizzazione","Facoltativa: con GitHub puoi ritrovare gli stessi dati su telefono e computer."],
+ ["🎨 Colori","Tema chiaro o scuro e colori a scelta, dalla schermata Colori."],
+ ["📲 Come app","Dal browser scegli “Aggiungi a schermata Home”: l’app si apre a tutto schermo."]])
+ +`<div class="card"><b>🔒 I tuoi dati restano tuoi</b><div class="mu" style="margin-top:4px">Dispensa, ricette e liste sono salvate su questo dispositivo e non sono visibili ad altre persone. Le immagini di volantini e scontrini vengono inviate al servizio AI solo per essere lette.</div></div>`}
+function welcomeHtml(){if(!window.setKey)return"";const done=lsg("welcomed","");if(done&&!S.guide)return"";let px=false;try{px=!!JSON.parse(localStorage.getItem("aproxy")||"null")}catch(e){}
+ const ai=px?`<div class="mu" style="margin-top:4px">✅ L’accesso all’AI è già attivo su questo dispositivo: non devi creare nessuna chiave.</div>`:`<div class="mu" style="margin-top:4px">Per ricette, volantini e piano serve una chiave gratuita di Groq:<br>1. Apri <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> e accedi (con Google va bene).<br>2. Tocca “Create API Key”, dai un nome e copia la chiave (inizia con <b>gsk_</b>).<br>3. Torna qui, tocca <b>🔑 Chiave AI</b> in alto e incollala.<br>La chiave resta solo su questo dispositivo e non va condivisa. Se qualcuno ti ha mandato un link di accesso, aprilo e basta.</div>`;
+ return `<div class="card"><div class="row"><b>👋 Benvenuto in Dispensa Smart</b><button class="x" onclick="wDone()" aria-label="Chiudi">✕</button></div>
+ <div class="mu">Quattro passi per partire:</div>
+ <div style="margin-top:10px"><b>1. 📲 Mettila sul telefono</b><div class="mu" style="margin-top:4px">iPhone: apri il sito con Safari, tocca Condividi e poi “Aggiungi alla schermata Home”.<br>Android: apri il sito con Chrome, tocca ⋮ e poi “Installa app” o “Aggiungi a schermata Home”.</div></div>
+ <div style="margin-top:10px"><b>2. 🔑 Attiva l’AI</b>${ai}</div>
+ <div style="margin-top:10px"><b>3. 🥫 Riempi la dispensa</b><div class="mu" style="margin-top:4px">In “Aggiungi spesa” inserisci i prodotti uno a uno, oppure scansiona uno scontrino. Poi vai su Ricette per farti suggerire cosa cucinare.</div></div>
+ <div style="margin-top:10px"><b>4. 💾 I tuoi dati</b><div class="mu" style="margin-top:4px">Restano su questo dispositivo. In “Dispensa” trovi le copie di sicurezza automatiche e “Salva file JSON” per un backup.</div></div>
+ <button class="btn" style="margin-top:14px" onclick="wDone()">Ho capito, iniziamo</button></div>`}
+function wDone(){lss("welcomed","1");S.guide=false;render()}
+function vBackup(){return `<div class="card"><b>💾 Backup e importazione dati</b><div class="mu">“Copia i miei dati” mette tutto in questo riquadro. Per importare, incolla qui un backup e premi Importa: i dati già presenti non vengono cancellati.</div><textarea id="bk" rows="4" placeholder="Incolla qui il backup…" style="width:100%;margin-top:8px;padding:10px;border:1px solid var(--bd);border-radius:22px;background:var(--card);color:var(--tx);font:inherit"></textarea><div class="row" style="margin-top:8px"><button class="btn g" onclick="bkCopy()">Copia i miei dati</button><button class="btn" onclick="bkImp()">Importa</button></div><div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap"><button class="btn g" onclick="bkFile()">⬇️ Salva file JSON</button><label class="btn g" style="cursor:pointer">📂 Carica file JSON<input type="file" accept=".json,application/json" hidden onchange="bkLoad(this)"></label><button class="btn g" onclick="syncSite()">🔄 Aggiorna dal sito</button></div><div class="mu" style="margin-top:8px">Il file <b>dispensa-smart-dati.json</b> contiene prodotti, ricette, lista, cronologia e foto. Se lo metti accanto all’HTML su un sito, puoi caricarlo con “Aggiorna dal sito”: non viene più caricato in automatico, così chi apre il sito non vede i tuoi dati.</div></div>`}
 const bkData=()=>({app:"dispensa-smart",saved:new Date().toISOString(),items:S.items,mine:S.mine,shop:S.shop,hist:S.hist,lib:S.lib,ph:S.ph,geo:S.geo,plan:S.plan,coll:S.coll.map(c=>({...c,names:c.ids.map(i=>{const r=S.mine.find(m=>m.id===i);return r?r.title:""})})),cdel:S.cdel,fly:S.fly,pold:S.pold,theme:S.th});
 function bkFile(){const t=JSON.stringify(bkData());const ta=$("bk");if(ta)ta.value=t.length<150000?t:"";
  try{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([t],{type:"application/json"}));a.download="dispensa-smart-dati.json";document.body.appendChild(a);a.click();a.remove();
@@ -890,6 +925,6 @@ async function sync(){
  }catch(e){setSy("local")}
 }
 if(S.items.length||S.mine.length)snapLocal();applyTheme();try{matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{if(((S.th||{}).mode||"auto")==="auto")applyTheme()})}catch(e){}
-render();sync();(ghOn()?ghInit():autoLoad());
+render();sync();(ghOn()?ghInit():0);
 </script><script>if("serviceWorker" in navigator&&location.protocol.indexOf("http")===0)navigator.serviceWorker.register("sw.js").catch(function(){});</script>
 </body></html>
