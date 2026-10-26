@@ -134,14 +134,14 @@ const FRESH=/latte|panna|yogurt|ricotta|mozzarella|burro|succo/i;
 const U={kg:["g",1000],g:["g",1],l:["ml",1000],ml:["ml",1],pz:["pz",1],cucchiaio:["cucchiai",1],"mezzo cucchiaio":["cucchiai",.5],cucchiaino:["cucchiaini",1]};
 const L=k=>{try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}};
 const W=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
-let S={tab:"oggi",items:L("items")||[],lib:L("lib")||{},hist:L("hist")||[],ph:L("ph")||{},mine:L("mine")||[],shop:L("shop")||[],srch:[],impLink:"",q:"",sb:false,serr:"",plan:L("plan")||null,pold:L("pold")||[],th:L("theme")||{mode:"auto",preset:"viola"},pp:2,pbz:false,perr:"",geo:L("geo")||{city:"",zone:"",stores:[]},stl:[],off:[],gb:"",recs:L("recs")||[],coll:L("coll")||[],fly:L("fly")||[],cur:null,step:0,done:{},busy:false,err:""};
+let S={tab:"oggi",items:L("items")||[],lib:L("lib")||{},hist:L("hist")||[],ph:L("ph")||{},mine:L("mine")||[],shop:L("shop")||[],srch:[],impLink:"",q:"",sb:false,serr:"",plan:L("plan")||null,pold:L("pold")||[],th:L("theme")||{mode:"auto",preset:"viola"},pp:2,pbz:false,perr:"",geo:L("geo")||{city:"",zone:"",stores:[]},stl:[],off:[],gb:"",recs:L("recs")||[],coll:L("coll")||[],cdel:L("cdel")||[],fly:L("fly")||[],cur:null,step:0,done:{},busy:false,err:""};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const iso=d=>d.toISOString().slice(0,10);
 const today=()=>iso(new Date());
 const days=d=>d?Math.round((new Date(d)-new Date(today()))/864e5):Infinity;
 const addDays=n=>{const d=new Date();d.setDate(d.getDate()+n);return iso(d)};
-const save=()=>{if(S.hist.length>60)S.hist.length=60;W("items",S.items);W("lib",S.lib);W("hist",S.hist);W("mine",S.mine);W("shop",S.shop);W("plan",S.plan);W("pold",S.pold);W("coll",S.coll);W("fly",S.fly);if(!ghMute){try{localStorage.setItem("lm",Date.now())}catch(e){}if(ghOn())ghSched()}push()};
+const save=()=>{if(S.hist.length>60)S.hist.length=60;W("items",S.items);W("lib",S.lib);W("hist",S.hist);W("mine",S.mine);W("shop",S.shop);W("plan",S.plan);W("pold",S.pold);W("coll",S.coll);W("cdel",S.cdel);W("fly",S.fly);if(!ghMute){try{localStorage.setItem("lm",Date.now())}catch(e){}if(ghOn())ghSched()}push()};
 const fmt=(q,u)=>u==="cucchiai"?(q===.5?"mezzo cucchiaio":q===1?"1 cucchiaio":+q.toFixed(2)+" cucchiai"):u==="cucchiaini"?(q===1?"1 cucchiaino":+q.toFixed(2)+" cucchiaini"):u==="pz"?q+" pz":q>=1000?(q/1000).toFixed(q%1000?2:0).replace(/\.?0+$/,"")+(u==="g"?" kg":" l"):Math.round(q)+" "+u;
 const guess=n=>{n=n.toLowerCase();for(const c in KW)if(KW[c].split(" ").some(k=>n.includes(k)))return c;return "Altro"};
 const soon=()=>S.items.filter(i=>days(i.exp)<=3);
@@ -177,9 +177,16 @@ function shopOne(i){const r=cr(),g=r.ingredients[i],a=avail(g),have=a.it&&a.it.u
  const ex=S.shop.find(x=>!x.done&&nm(x.name)===nm(g.name)&&x.unit===g.unit);
  if(ex)ex.amount=(+ex.amount||0)+need;else S.shop.push({id:"s"+Date.now()+Math.random().toString(36).slice(2,6),name:g.name,amount:need,unit:g.unit||"",done:false,from:r.title});
  save();render();toast(`🛒 ${esc(g.name)} aggiunto alla lista<br><a href="#" onclick="S.tab='lista';render();return false" style="color:inherit;font-weight:700">Vai alla lista →</a>`)}
+function shopTot(){const todo=S.shop.filter(x=>!x.done);let tot=0,np=0;const st={};
+ todo.forEach(x=>{let p=pNum(x.price),store=x.store||"";if(p==null){const of=offerFor(x.name);if(of&&of.pr!=null){p=of.pr;store=store||of.f.store||""}}
+  if(p==null){np++;return}tot+=p;st[store||"Altro"]=(st[store||"Altro"]||0)+p});
+ return{n:todo.length,done:S.shop.length-todo.length,tot:Math.round(tot*100)/100,np,st}}
+const eur=v=>"€ "+v.toFixed(2).replace(".",",");
+function shopSumHtml(){if(!S.shop.length)return"";const t=shopTot(),stores=Object.entries(t.st);
+ return `<div class="card"><div class="row"><b>🧾 Da comprare: ${t.n} articol${t.n===1?"o":"i"}</b>${t.done?`<span class="mu">${t.done} già spuntat${t.done===1?"o":"i"}</span>`:""}</div>${t.tot>0?`<div style="margin-top:6px"><span class="bd ok" style="font-size:14px">Totale stimato: ${eur(t.tot)}</span></div>${stores.length>1?`<div class="mu" style="margin-top:6px">${stores.map(([n,v])=>esc(n)+": "+eur(v)).join(" · ")}</div>`:""}<div class="mu" style="margin-top:4px">Prezzo di una confezione per articolo${t.np?`; ${t.np} senza prezzo non inclus${t.np===1?"o":"i"}`:""}.</div>`:`<div class="mu" style="margin-top:6px">Nessun prezzo disponibile: aggiungi articoli dalle offerte dei volantini per vedere il totale.</div>`}</div>`}
 function vShop(){
  const dn=S.shop.filter(x=>x.done);
- let h=`<div class="card"><div class="row"><input id="sn" placeholder="Aggiungi alla lista (es. Latte)" onkeydown="if(event.key==='Enter')addShop()"><button class="btn" onclick="addShop()">＋</button></div><div class="mu" style="margin-top:8px">Spunta un prodotto quando lo compri: va subito in dispensa, con quantità e scadenza stimate che puoi correggere con ✏️.</div></div>`;
+ let h=`<div class="card"><div class="row"><input id="sn" placeholder="Aggiungi alla lista (es. Latte)" onkeydown="if(event.key==='Enter')addShop()"><button class="btn" onclick="addShop()">＋</button></div><div class="mu" style="margin-top:8px">Spunta un prodotto quando lo compri: va subito in dispensa, con quantità e scadenza stimate che puoi correggere con ✏️.</div></div>`+shopSumHtml();
  if(!S.shop.length)return h+`<p class="mu">La lista è vuota. Dalle ricette (cercate, manuali o dell’AI) puoi aggiungere gli ingredienti che ti mancano.</p>`;
  h+=S.shop.slice().sort((a,b)=>a.done-b.done).map(x=>`<div class="card row"><label style="display:flex;gap:10px;align-items:center;flex:1;cursor:pointer"><input type="checkbox" style="width:22px;height:22px;flex:none" ${x.done?"checked":""} onchange="tick('${x.id}')"><span style="${x.done?"text-decoration:line-through;opacity:.55":""}">${emo(x.name)} <b>${esc(x.name)}</b>${x.amount?" · "+fmt(x.amount,x.unit):""}${x.store?` <span class="bd ok">🏪 ${esc(x.store)}</span>`:""}${x.price?` <span class="bd">${esc(x.price)}</span>`:""}${x.until?` <span class="bd ${x.until<=addDays(2)?"":"ok"}">⏳ ${untilTxt(x.until)}</span>`:""}${x.from?`<div class="mu">per: ${esc(x.from)}</div>`:""}</span></label><button class="x" onclick="rmShop('${x.id}')" aria-label="Elimina">✕</button></div>`).join("");
  return h+(dn.length?`<button class="btn g" onclick="S.shop=S.shop.filter(x=>!x.done);save();render()">Rimuovi acquistati (${dn.length})</button>`:"")}
@@ -475,7 +482,7 @@ S.mine.forEach(r=>{if(!r.id)r.id="m"+Date.now()+Math.random().toString(36).slice
 
 /* ===== raccolte (come le playlist) ===== */
 const BS='style="padding:6px 12px;font-size:14px"';
-const cid=()=>"c"+Date.now()+Math.random().toString(36).slice(2,5);
+const cid=()=>"c"+Date.now()+Math.random().toString(36).slice(2,5),ctouch=c=>{c.u=Date.now();return c};
 const inColl=r=>{if(!S.rcoll)return true;const c=S.coll.find(x=>x.id===S.rcoll);return !!c&&c.ids.includes(r.id)};
 const collN=c=>S.mine.filter(r=>c.ids.includes(r.id)).length;
 function collBar(){
@@ -485,13 +492,13 @@ function collBar(){
  if(c)h+=`<div style="margin-top:12px;border-top:2px dashed var(--bd);padding-top:10px"><div class="row" style="gap:6px"><input id="crn" value="${esc(c.name)}"><button class="btn g" ${BS} onclick="collRename('${c.id}')">Salva nome</button></div><div class="mu" style="margin:10px 0 4px">Aggiungi in blocco a questa raccolta:</div><div style="display:flex;gap:6px;flex-wrap:wrap">${[["manual","✍️ manuali"],["link","🔗 da link"],["web","🔎 cercate"],["ai","🤖 AI"]].map(([k,n])=>`<button class="btn g" ${BS} onclick="collBulk('${c.id}','${k}')">＋ ${n}</button>`).join("")}</div><div style="margin-top:10px"><button class="btn g" ${BS} onclick="collDel('${c.id}')">🗑️ Elimina raccolta</button></div></div>`;
  return h+`</div>`}
 const collPick=r=>`<div class="card"><b>📁 Raccolte per “${esc(r.title)}”</b>${S.coll.length?S.coll.map(c=>`<label style="display:flex;gap:10px;align-items:center;margin-top:8px;cursor:pointer"><input type="checkbox" style="width:22px;height:22px;flex:none" ${c.ids.includes(r.id)?"checked":""} onchange="collTog('${c.id}','${r.id}')">📁 ${esc(c.name)}</label>`).join(""):`<div class="mu" style="margin-top:6px">Non hai ancora raccolte.</div>`}<div class="row" style="margin-top:10px;gap:6px"><input id="cq" placeholder="Nuova raccolta…"><button class="btn" onclick="collMake('${r.id}')">Crea e aggiungi</button></div></div>`;
-function collNew(){const n=($("cn").value||"").trim();if(!n)return toast("Dai un nome alla raccolta.");const c={id:cid(),name:n,ids:[]};if($("cna").checked)c.ids=S.mine.filter(r=>(r.src||"ai")==="manual").map(r=>r.id);S.coll.push(c);S.rcoll=c.id;S.cnew=false;save();render();toast(`📁 Raccolta “${esc(n)}” creata (${c.ids.length} ricette)`)}
-function collRename(id){const c=S.coll.find(x=>x.id===id),n=($("crn").value||"").trim();if(!c||!n)return;c.name=n;save();render();toast("Nome salvato")}
+function collNew(){const n=($("cn").value||"").trim();if(!n)return toast("Dai un nome alla raccolta.");const c=ctouch({id:cid(),name:n,ids:[]});if($("cna").checked)c.ids=S.mine.filter(r=>(r.src||"ai")==="manual").map(r=>r.id);S.coll.push(c);S.rcoll=c.id;S.cnew=false;save();render();toast(`📁 Raccolta “${esc(n)}” creata (${c.ids.length} ricette)`)}
+function collRename(id){const c=S.coll.find(x=>x.id===id),n=($("crn").value||"").trim();if(!c||!n)return;c.name=n;ctouch(c);save();render();toast("Nome salvato")}
 function collDel(id){const c=S.coll.find(x=>x.id===id);if(!c)return;if(S.cd!==id){S.cd=id;setTimeout(()=>{S.cd=null},6000);return toast("Eliminare la raccolta? Le ricette restano nel Ricettario. Premi di nuovo 🗑️ entro 6 secondi.")}
- S.cd=null;S.coll=S.coll.filter(x=>x.id!==id);S.rcoll="";save();render();toast("Raccolta eliminata")}
-function collBulk(id,k){const c=S.coll.find(x=>x.id===id);if(!c)return;let n=0;S.mine.forEach(r=>{if((r.src||"ai")===k&&!c.ids.includes(r.id)){c.ids.push(r.id);n++}});save();render();toast(n?`📁 ${n} ricette aggiunte`:"Nessuna ricetta nuova da aggiungere.")}
-function collTog(cidv,rid){const c=S.coll.find(x=>x.id===cidv);if(!c)return;const i=c.ids.indexOf(rid);if(i>=0)c.ids.splice(i,1);else c.ids.push(rid);save();render()}
-function collMake(rid){const n=($("cq").value||"").trim();if(!n)return toast("Scrivi il nome della nuova raccolta.");S.coll.push({id:cid(),name:n,ids:[rid]});save();render();toast(`📁 Raccolta “${esc(n)}” creata`)}
+ S.cd=null;S.coll=S.coll.filter(x=>x.id!==id);S.cdel=[...S.cdel.filter(x=>x.id!==id),{id,u:Date.now()}].slice(-50);S.rcoll="";save();render();toast("Raccolta eliminata")}
+function collBulk(id,k){const c=S.coll.find(x=>x.id===id);if(!c)return;let n=0;S.mine.forEach(r=>{if((r.src||"ai")===k&&!c.ids.includes(r.id)){c.ids.push(r.id);n++}});if(n)ctouch(c);save();render();toast(n?`📁 ${n} ricette aggiunte`:"Nessuna ricetta nuova da aggiungere.")}
+function collTog(cidv,rid){const c=S.coll.find(x=>x.id===cidv);if(!c)return;const i=c.ids.indexOf(rid);if(i>=0)c.ids.splice(i,1);else c.ids.push(rid);ctouch(c);save();render()}
+function collMake(rid){const n=($("cq").value||"").trim();if(!n)return toast("Scrivi il nome della nuova raccolta.");S.coll.push(ctouch({id:cid(),name:n,ids:[rid]}));save();render();toast(`📁 Raccolta “${esc(n)}” creata`)}
 
 /* ===== volantini ===== */
 const fD=d=>d?String(d).split("-").reverse().join("/"):"";
@@ -655,7 +662,7 @@ function vFlyers(){
   h+=`<div class="card"><div class="row"><div><b>🏪 ${esc(f.store||"Negozio non indicato")}</b><div class="mu">${esc(f.name||"")} · ${f.offers.length} offerte</div></div><button class="x" onclick="flyDel('${f.id}')" aria-label="Elimina volantino">🗑️</button></div><div style="margin-top:6px"><span class="bd ${act?"":"ok"}">${act?(f.to?"valido fino al "+fD(f.to)+" ("+(dd===0?"oggi":dd+" gg")+")":"scadenza non indicata"):"⚠️ scaduto il "+fD(f.to)}</span></div><details style="margin-top:8px" ${S.fopen===f.id||mine?"open":""}><summary class="mu" style="cursor:pointer">Mostra ${rows.length} offerte</summary>${rows.slice(0,120).map(x=>`<div style="margin-top:10px;${x.exp?"opacity:.5":""}">${emo(x.o.item)} <b>${esc(x.o.item)}</b>${x.o.price?` <span class="bd">${esc(x.o.price)}</span>`:""}${x.onL?` <span class="bd ok">🛒 in lista</span>`:""}${x.fr?` <span class="bd ok">⭐ la usi spesso</span>`:""}<div class="mu">${esc(x.o.offer)}${x.to?" · "+(x.exp?"scaduta il ":"fino al ")+fD(x.to)+" ("+untilTxt(x.to)+")":""}</div>${x.exp?"":`<button class="btn ${x.inS?"":"g"}" ${BS} style="margin-top:6px" onclick="offShop('${f.id}',${x.ix})">${x.inS?"✓ In lista":"🛒 Aggiungi alla lista"}</button>`}</div>`).join("")||`<div class="mu" style="margin-top:8px">Nessuna offerta utile per te in questo volantino.</div>`}</details></div>`});
  return h}
 function vBackup(){return `<div class="card"><b>💾 Backup e importazione dati</b><div class="mu">“Copia i miei dati” mette tutto in questo riquadro. Per importare, incolla qui un backup e premi Importa: i dati già presenti non vengono cancellati.</div><textarea id="bk" rows="4" placeholder="Incolla qui il backup…" style="width:100%;margin-top:8px;padding:10px;border:1px solid var(--bd);border-radius:22px;background:var(--card);color:var(--tx);font:inherit"></textarea><div class="row" style="margin-top:8px"><button class="btn g" onclick="bkCopy()">Copia i miei dati</button><button class="btn" onclick="bkImp()">Importa</button></div><div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap"><button class="btn g" onclick="bkFile()">⬇️ Salva file JSON</button><label class="btn g" style="cursor:pointer">📂 Carica file JSON<input type="file" accept=".json,application/json" hidden onchange="bkLoad(this)"></label><button class="btn g" onclick="syncSite()">🔄 Aggiorna dal sito</button></div><div class="mu" style="margin-top:8px">Il file <b>dispensa-smart-dati.json</b> contiene prodotti, ricette, lista, cronologia e foto. Se lo metti accanto all’HTML su un sito, viene caricato da solo su un dispositivo ancora vuoto.</div></div>`}
-const bkData=()=>({app:"dispensa-smart",saved:new Date().toISOString(),items:S.items,mine:S.mine,shop:S.shop,hist:S.hist,lib:S.lib,ph:S.ph,geo:S.geo,plan:S.plan,coll:S.coll,fly:S.fly,pold:S.pold,theme:S.th});
+const bkData=()=>({app:"dispensa-smart",saved:new Date().toISOString(),items:S.items,mine:S.mine,shop:S.shop,hist:S.hist,lib:S.lib,ph:S.ph,geo:S.geo,plan:S.plan,coll:S.coll.map(c=>({...c,names:c.ids.map(i=>{const r=S.mine.find(m=>m.id===i);return r?r.title:""})})),cdel:S.cdel,fly:S.fly,pold:S.pold,theme:S.th});
 function bkFile(){const t=JSON.stringify(bkData());const ta=$("bk");if(ta)ta.value=t.length<150000?t:"";
  try{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([t],{type:"application/json"}));a.download="dispensa-smart-dati.json";document.body.appendChild(a);a.click();a.remove();
   toast(window.setKey?"⬇️ File dispensa-smart-dati.json salvato: lo trovi nella cartella Download.":"⬇️ Download avviato. Se il file non compare, qui il browser lo blocca: usa “Copia i miei dati”.")}catch(e){toast("Download non disponibile qui: usa “Copia i miei dati”.")}}
@@ -664,7 +671,7 @@ async function autoLoad(force){if(!force&&(S.items.length||S.mine.length))return
  try{const r=await fetch("dispensa-smart-dati.json",{cache:"no-store"});if(!r.ok)throw 0;const d=await r.json();if(d&&(d.items||d.mine))bkApply(d,force);else if(force)toast("Il file sul sito è vuoto o non valido.")}catch(e){if(force)toast("Nessun file dispensa-smart-dati.json trovato sul sito (funziona solo dalla versione pubblicata online).")}}
 function bkCopy(){const t=$("bk");t.value=JSON.stringify({items:S.items,mine:S.mine,shop:S.shop,hist:S.hist,lib:S.lib});try{t.select();navigator.clipboard.writeText(t.value)}catch(e){}toast("Dati inseriti nel riquadro: copiali da lì se non sono già negli appunti.")}
 function bkImp(){let d;try{d=JSON.parse($("bk").value)}catch(e){return toast("Testo non valido: incolla il backup completo, senza modifiche.")}return bkApply(d)}
-function bkApply(d,rep){if(rep&&(d.items||d.mine)){S.items=[];S.mine=[];S.shop=[];S.hist=[];S.lib={};S.ph={};S.plan=null;S.coll=[];S.fly=[];S.pold=[]}
+function bkApply(d,rep){if(rep&&(d.items||d.mine)){S.items=[];S.mine=[];S.shop=[];S.hist=[];S.lib={};S.ph={};S.plan=null;S.coll=[];S.fly=[];S.pold=[];S.cdel=[]}
  if(Array.isArray(d))d={items:d};
  const g=k=>{let v=d&&d[k];if(typeof v==="string"){try{v=JSON.parse(v)}catch(e){v=null}}return v};
  let ni=0,nm2=0,ns=0;
@@ -678,7 +685,15 @@ function bkApply(d,rep){if(rep&&(d.items||d.mine)){S.items=[];S.mine=[];S.shop=[
  const pl=g("plan");if(pl&&pl.start&&pl.days&&(!S.plan||(rep&&pl.start>=S.plan.start)))S.plan=pl;
  const po=g("pold");if(Array.isArray(po)){const have=new Set(S.pold.map(x=>x.start));po.forEach(x=>{if(x&&x.start&&x.days&&!have.has(x.start)&&(!S.plan||S.plan.start!==x.start))S.pold.push(x)});S.pold.sort((a,b)=>b.start<a.start?-1:1);S.pold.length=Math.min(S.pold.length,8)}
  const th=g("theme");if(th&&typeof th==="object"&&(rep||!L("theme"))){S.th=th;W("theme",S.th);applyTheme()}
- const cl=g("coll");if(Array.isArray(cl))cl.forEach(c=>{if(!(c&&c.id&&c.name&&Array.isArray(c.ids)))return;const ex=S.coll.find(x=>x.id===c.id);if(ex)c.ids.forEach(i=>{if(!ex.ids.includes(i))ex.ids.push(i)});else S.coll.push({id:String(c.id),name:String(c.name),ids:c.ids.map(String)})});
+ const cd=g("cdel");if(Array.isArray(cd))cd.forEach(t=>{if(t&&t.id&&!S.cdel.some(x=>x.id===t.id&&x.u>=t.u))S.cdel=[...S.cdel.filter(x=>x.id!==t.id),{id:String(t.id),u:+t.u||0}].slice(-50)});
+ const cl=g("coll");if(Array.isArray(cl)){const fixIds=c=>{const nms=Array.isArray(c.names)?c.names:[];return c.ids.map((i,k)=>{i=String(i);if(S.mine.some(m=>m.id===i))return i;const r=nms[k]&&S.mine.find(m=>nm(m.title)===nm(nms[k]));return r?r.id:i})};
+  cl.forEach(c=>{if(!(c&&c.id&&c.name&&Array.isArray(c.ids)))return;const id=String(c.id),ids=[...new Set(fixIds(c))],u=+c.u||0;
+   const tb=S.cdel.find(x=>x.id===id);if(tb&&tb.u>=u&&!rep)return;
+   const ex=S.coll.find(x=>x.id===id);
+   if(!ex)S.coll.push({id,name:String(c.name),ids,u});
+   else if(u>(+ex.u||0)){ex.name=String(c.name);ex.ids=ids;ex.u=u}
+   else if(u===(+ex.u||0))ids.forEach(i=>{if(!ex.ids.includes(i))ex.ids.push(i)})});
+  S.coll=S.coll.filter(c=>{const tb=S.cdel.find(x=>x.id===c.id);return !(tb&&tb.u>(+c.u||0))})}
  const fl=g("fly");if(Array.isArray(fl)){const fi=new Set(S.fly.map(f=>f.id));fl.forEach(f=>{if(f&&f.id&&Array.isArray(f.offers)&&!fi.has(f.id))S.fly.push(f)});S.fly.sort((a,b)=>String(b.id).localeCompare(String(a.id)))}
 
  if(!(ni||nm2||ns||np)&&!hi&&!lb)return toast("Non ho trovato dati nuovi da importare.");
@@ -773,10 +788,10 @@ function redo(i){openR(S.hist[i].r,"cron")}
 function vPref(){const f=Object.values(S.lib).filter(l=>l.fav);
  if(!f.length)return `<p class="mu">Nessun preferito. Apri una ricetta e tocca “Aggiungi ai preferiti”.</p>`;
  return f.map(l=>`<div class="card row" style="cursor:pointer" onclick="S.sv=S.recs;S.recs=[S.lib['${esc(l.r.title).replace(/'/g,"\\'")}'].r];S.tab='ricette';open_(0);S.from='pref';S.recs=S.sv">${th(l.r)}<div style="flex:1"><b>${esc(l.r.title)}</b> ${srcB(l.r)}<div class="mu">${"★".repeat(l.stars||0)||"Non valutata"}</div></div><span>›</span></div>`).join("")}
-let col=null,last={},tm,warned=0,pend=false,wr=false;const K=["items","lib","hist","mine","shop","coll","fly","plan","pold"];
+let col=null,last={},tm,warned=0,pend=false,wr=false;const K=["items","lib","hist","mine","shop","coll","cdel","fly","plan","pold"];
 const setSy=m=>{const e=$("sy");if(e)e.textContent=m==="on"?"☁️ sincronizzato":"📴 solo su questo dispositivo"};
 const hid=t=>{let h=5381;for(const c of t)h=((h*33)^c.charCodeAt(0))>>>0;return "ph_"+h.toString(36)};
-const cache=()=>{W("items",S.items);W("lib",S.lib);W("hist",S.hist);W("mine",S.mine);W("shop",S.shop);W("ph",S.ph);W("coll",S.coll);W("fly",S.fly);W("plan",S.plan);W("pold",S.pold)};
+const cache=()=>{W("items",S.items);W("lib",S.lib);W("hist",S.hist);W("mine",S.mine);W("shop",S.shop);W("ph",S.ph);W("coll",S.coll);W("cdel",S.cdel);W("fly",S.fly);W("plan",S.plan);W("pold",S.pold)};
 function err(){if(!warned++)toast("Sincronizzazione non riuscita: i dati restano su questo dispositivo.")}
 function push(){pend=true;clearTimeout(tm);tm=setTimeout(flush,500)}
 async function flush(){pend=false;if(!col)return;wr=true;try{for(const k of K){const v=S[k],s=JSON.stringify(v);if(s===last[k])continue;try{await col.doc(k).set({v});last[k]=s}catch(e){err()}}}finally{wr=false}}
